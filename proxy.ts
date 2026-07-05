@@ -45,7 +45,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Premium routes
+  // Premium routes — redirect to signup instead of dashboard
   const premiumRoutes = [
     "/dashboard/interview",
     "/dashboard/career",
@@ -53,15 +53,18 @@ export async function proxy(request: NextRequest) {
     "/dashboard/messages",
   ];
   if (premiumRoutes.some((route) => pathname.startsWith(route))) {
+    if (!token) {
+      return NextResponse.redirect(new URL("/signin", request.url));
+    }
     if (!["PREMIUM", "ADMIN"].includes(role)) {
-      return NextResponse.redirect(new URL("/dashboard?upgrade=true", request.url));
+      return NextResponse.redirect(new URL("/pricing", request.url));
     }
     return NextResponse.next();
   }
 
-  // Dashboard routes
+  // Dashboard routes — allow all users to view (guest mode)
+  // Don't redirect, just let them through
   if (pathname.startsWith("/dashboard")) {
-    if (!token) return NextResponse.redirect(new URL("/dashboard?guest=true", request.url));
     return NextResponse.next();
   }
 

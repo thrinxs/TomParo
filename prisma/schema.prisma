@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 model User {
@@ -34,12 +34,12 @@ model Account {
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String?
-  access_token      String?
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String?
+  id_token          String? @db.Text
   session_state     String?
   user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -84,12 +84,12 @@ model Resume {
   title         String
   fileName      String?
   fileUrl       String?
-  rawText       String?
-  parsedData    String?
+  rawText       String?       @db.Text
+  parsedData    String?       @db.Text
   atsScore      Int?
   version       Int           @default(1)
   isOptimized   Boolean       @default(false)
-  optimizedText String?
+  optimizedText String?       @db.Text
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -103,12 +103,12 @@ model JobAnalysis {
   resumeId           String?
   jobTitle           String?
   company            String?
-  jobDescription     String
-  parsedRequirements String?
-  requiredSkills     String?
-  matchScore         Int?
-  missingSkills      String?
-  recommendations    String?
+  jobDescription     String        @db.Text
+  parsedRequirements String?       @db.Text
+  requiredSkills     String?       @db.Text
+  matchScore          Int?
+  missingSkills      String?       @db.Text
+  recommendations    String?       @db.Text
   createdAt          DateTime      @default(now())
   user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   resume             Resume?       @relation(fields: [resumeId], references: [id])
@@ -120,8 +120,8 @@ model Application {
   userId           String
   resumeId         String?
   jobAnalysisId    String?
-  coverLetter      String?
-  emailDraft       String?
+  coverLetter      String?      @db.Text
+  emailDraft       String?      @db.Text
   emailStyle       String?
   emailSubject     String?
   status           String       @default("draft")
@@ -140,9 +140,9 @@ model InterviewSession {
   jobTitle       String?
   difficulty     String    @default("standard")
   questionType   String    @default("mixed")
-  questions      String?
-  answers        String?
-  feedback       String?
+  questions      String?   @db.Text
+  answers        String?   @db.Text
+  feedback       String?   @db.Text
   readinessScore Int?
   completedAt    DateTime?
   createdAt      DateTime  @default(now())
@@ -163,12 +163,12 @@ model UsageTracking {
 model CareerInsight {
   id               String   @id @default(cuid())
   userId           String
-  missingSkills    String?
-  recommendedCerts String?
-  experienceGaps   String?
+  missingSkills    String?  @db.Text
+  recommendedCerts String?  @db.Text
+  experienceGaps   String?  @db.Text
   careerLevel      String?
-  marketDemand     String?
-  nextLevelNeeds   String?
+  marketDemand     String?  @db.Text
+  nextLevelNeeds   String?  @db.Text
   createdAt        DateTime @default(now())
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
