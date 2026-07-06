@@ -1,9 +1,7 @@
 "use client";
 
-
 import Logo from "@/components/Logo";
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
@@ -54,8 +52,8 @@ export default function DashboardSidebar() {
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-white/5 bg-slate-950/95 backdrop-blur-xl">
       {/* Logo */}
       <div className="border-b border-white/5 px-6 py-4">
-  <Logo size="md" />
-</div>
+        <Logo size="md" />
+      </div>
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1 overflow-y-auto p-4">
@@ -67,7 +65,7 @@ export default function DashboardSidebar() {
           return (
             <Link
               key={item.href}
-              href={isLocked ? "/dashboard?upgrade=true" : item.href}
+              href={item.href}
               className={`group flex items-center justify-between rounded-xl px-4 py-3 text-sm font-medium transition ${
                 isActive
                   ? "bg-blue-500/10 text-blue-400"

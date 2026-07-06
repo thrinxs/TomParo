@@ -1,124 +1,192 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { FileText, Target, TrendingUp, Mail, ArrowRight } from "lucide-react";
+import { useSession } from "next-auth/react";
+import { useSearchParams, useRouter } from "next/navigation";
+import UsageCounter from "@/components/dashboard/UsageCounter";
+import toast, { Toaster } from "react-hot-toast";
+import {
+  FileText,
+  Target,
+  Mail,
+  TrendingUp,
+  Sparkles,
+  ArrowRight,
+  Crown,
+} from "lucide-react";
 
 export default function DashboardHome() {
+  const { data: session } = useSession();
+  const user = session?.user as any;
+  const isPremium = user?.isPremium || false;
+
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [verifyingPayment, setVerifyingPayment] = useState(false);
+
+  useEffect(() => {
+    const payment = searchParams.get("payment");
+    const reference = searchParams.get("reference");
+
+    if (payment === "success" && reference) {
+      setVerifyingPayment(true);
+      fetch("/api/payment/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reference }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success) {
+            toast.success("🎉 Welcome to Premium! Enjoy unlimited access.");
+            router.replace("/dashboard");
+            setTimeout(() => window.location.reload(), 2000);
+          } else {
+            toast.error(data.error || "Payment verification failed");
+          }
+        })
+        .catch(() => {
+          toast.error("Failed to verify payment");
+        })
+        .finally(() => {
+          setVerifyingPayment(false);
+        });
+    }
+  }, [searchParams, router]);
+
+  const features = [
+    {
+      title: "Analyze Your CV",
+      description: "Get ATS score and AI-powered improvement suggestions",
+      icon: FileText,
+      href: "/dashboard/resume",
+      color: "blue",
+    },
+    {
+      title: "Match a Job",
+      description: "See how well your CV matches any job description",
+      icon: Target,
+      href: "/dashboard/job",
+      color: "cyan",
+    },
+    {
+      title: "Generate Application",
+      description: "AI-crafted cover letters and application emails",
+      icon: Mail,
+      href: "/dashboard/apply",
+      color: "emerald",
+    },
+    {
+      title: "Skill Gap Analysis",
+      description: "Discover skills you need to advance your career",
+      icon: TrendingUp,
+      href: "/dashboard/skills",
+      color: "purple",
+    },
+  ];
+
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="mx-auto max-w-6xl space-y-8">
+      <Toaster position="top-right" />
+
+      {verifyingPayment && (
+        <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 text-center">
+          <p className="text-sm text-blue-400">
+            🔄 Verifying your payment...
+          </p>
+        </div>
+      )}
+
       {/* Welcome */}
-      <div className="mb-10">
-        <h1 className="text-3xl font-semibold text-white">Your Dashboard</h1>
+      <div>
+        <h1 className="text-3xl font-bold text-white">
+          Welcome back, {user?.name?.split(" ")[0] || "there"} 👋
+        </h1>
         <p className="mt-2 text-slate-400">
-          Everything you need to power your job search.
+          Your AI-powered career assistant is ready to help.
         </p>
       </div>
 
-      {/* Score Cards Row */}
-      <div className="mb-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <FileText className="h-5 w-5 text-blue-400" />
-            <span className="text-xs text-slate-500">Not yet</span>
-          </div>
-          <p className="text-2xl font-bold text-white">—</p>
-          <p className="mt-1 text-xs text-slate-500">Resume Score</p>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <Target className="h-5 w-5 text-cyan-400" />
-            <span className="text-xs text-slate-500">Not yet</span>
-          </div>
-          <p className="text-2xl font-bold text-white">—</p>
-          <p className="mt-1 text-xs text-slate-500">Job Match</p>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <Mail className="h-5 w-5 text-emerald-400" />
-            <span className="text-xs text-slate-500">Not yet</span>
-          </div>
-          <p className="text-2xl font-bold text-white">—</p>
-          <p className="mt-1 text-xs text-slate-500">Applications</p>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <TrendingUp className="h-5 w-5 text-amber-400" />
-            <span className="text-xs text-slate-500">Not yet</span>
-          </div>
-          <p className="text-2xl font-bold text-white">—</p>
-          <p className="mt-1 text-xs text-slate-500">Skills Gap</p>
-        </div>
-      </div>
+      {/* Usage Counter */}
+      <UsageCounter />
 
       {/* Quick Actions */}
-      <div className="mb-10">
-        <h2 className="mb-4 text-xl font-semibold text-white">Quick Actions</h2>
+      <div>
+        <h2 className="mb-4 text-lg font-semibold text-white">
+          Quick Actions
+        </h2>
         <div className="grid gap-4 md:grid-cols-2">
-          <Link
-            href="/dashboard/resume"
-            className="group rounded-2xl border border-white/10 bg-white/[0.02] p-6 transition hover:border-blue-500/30 hover:bg-white/[0.04]"
-          >
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20">
-              <FileText className="h-6 w-6" />
-            </div>
-            <h3 className="text-lg font-semibold text-white">
-              Analyze Your Resume
-            </h3>
-            <p className="mt-2 text-sm text-slate-400">
-              Get your ATS score, strengths, and improvements in seconds.
-            </p>
-            <div className="mt-4 flex items-center gap-2 text-sm font-medium text-blue-400 transition group-hover:gap-3">
-              Start now <ArrowRight className="h-4 w-4" />
-            </div>
-          </Link>
-
-          <Link
-            href="/dashboard/job"
-            className="group rounded-2xl border border-white/10 bg-white/[0.02] p-6 transition hover:border-cyan-500/30 hover:bg-white/[0.04]"
-          >
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-500/10 text-cyan-400 ring-1 ring-cyan-500/20">
-              <Target className="h-6 w-6" />
-            </div>
-            <h3 className="text-lg font-semibold text-white">
-              Match a Job Vacancy
-            </h3>
-            <p className="mt-2 text-sm text-slate-400">
-              Paste a job description and see how well you match.
-            </p>
-            <div className="mt-4 flex items-center gap-2 text-sm font-medium text-cyan-400 transition group-hover:gap-3">
-              Start now <ArrowRight className="h-4 w-4" />
-            </div>
-          </Link>
+          {features.map((feature) => {
+            const Icon = feature.icon;
+            return (
+              <Link
+                key={feature.href}
+                href={feature.href}
+                className={`group rounded-2xl border border-white/10 bg-white/[0.02] p-6 transition hover:border-${feature.color}-500/30 hover:bg-white/[0.04]`}
+              >
+                <div className="flex items-start gap-4">
+                  <div
+                    className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-${feature.color}-500/10 ring-1 ring-${feature.color}-500/20`}
+                  >
+                    <Icon className={`h-6 w-6 text-${feature.color}-400`} />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-white">
+                      {feature.title}
+                    </h3>
+                    <p className="mt-1 text-sm text-slate-400">
+                      {feature.description}
+                    </p>
+                    <div className="mt-3 flex items-center gap-1 text-sm text-blue-400 transition group-hover:translate-x-1">
+                      Get started <ArrowRight className="h-4 w-4" />
+                    </div>
+                  </div>
+                </div>
+              </Link>
+            );
+          })}
         </div>
       </div>
 
-      {/* Getting Started */}
-      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-blue-600/5 to-cyan-500/5 p-8">
-        <h2 className="text-xl font-semibold text-white">Getting Started</h2>
-        <p className="mt-2 text-slate-400">
-          Follow these steps to unlock TomParo&apos;s full potential.
-        </p>
-
-        <div className="mt-6 space-y-3">
-          {[
-            "Upload your CV or create one from scratch",
-            "Paste a job description to see your match",
-            "Generate a tailored cover letter",
-            "Practice interviews (Premium)",
-          ].map((step, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-4 rounded-xl border border-white/5 bg-slate-900/40 p-4"
-            >
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-500/10 text-sm font-semibold text-blue-400 ring-1 ring-blue-500/20">
-                {i + 1}
+      {/* Premium CTA (only for non-premium) */}
+      {!isPremium && (
+        <div className="rounded-3xl border border-amber-500/20 bg-gradient-to-br from-amber-500/10 to-orange-500/5 p-8">
+          <div className="flex flex-col items-start gap-6 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-500/20">
+                <Crown className="h-6 w-6 text-amber-400" />
               </div>
-              <p className="text-sm text-slate-300">{step}</p>
+              <div>
+                <h3 className="text-xl font-bold text-white">
+                  Unlock TomParo Premium
+                </h3>
+                <p className="mt-1 text-sm text-slate-300">
+                  Unlimited AI, interview coaching, career chat, and more.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+                  <span className="rounded-full bg-slate-900/60 px-3 py-1 text-slate-300">
+                    ✨ Unlimited analyses
+                  </span>
+                  <span className="rounded-full bg-slate-900/60 px-3 py-1 text-slate-300">
+                    🎯 Interview coach
+                  </span>
+                  <span className="rounded-full bg-slate-900/60 px-3 py-1 text-slate-300">
+                    🧠 Career AI chat
+                  </span>
+                </div>
+              </div>
             </div>
-          ))}
+            <Link
+              href="/pricing"
+              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 px-6 py-3 text-sm font-medium text-white shadow-lg shadow-amber-700/25 transition hover:from-amber-500 hover:to-orange-500"
+            >
+              <Sparkles className="h-4 w-4" />
+              Upgrade Now
+            </Link>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -1,42 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { matchResumeToJob } from "@/lib/ai/job-analyzer";
+import { checkUsageLimit, trackUsage, UserRole } from "@/lib/usage-limiter";
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
+    const userId = (session?.user as any)?.id;
+    const role = ((session?.user as any)?.role || "FREE") as UserRole;
+
+    // Check usage limits
+    if (userId) {
+      const { allowed, usage } = await checkUsageLimit(
+        userId,
+        "jobMatch",
+        role
+      );
+
+      if (!allowed) {
+        return NextResponse.json(
+          {
+            error: `Daily limit reached (${usage.limit}/day). Upgrade to Premium for unlimited matches.`,
+            limitReached: true,
+            usage,
+          },
+          { status: 429 }
+        );
+      }
+    }
+
     const { resumeText, jobDescription } = await req.json();
 
-    if (!resumeText || typeof resumeText !== "string") {
+    if (!resumeText || !jobDescription) {
       return NextResponse.json(
-        { error: "Resume text is required" },
+        { error: "Resume and job description are required" },
         { status: 400 }
       );
     }
 
-    if (!jobDescription || typeof jobDescription !== "string") {
-      return NextResponse.json(
-        { error: "Job description is required" },
-        { status: 400 }
-      );
-    }
-
-    if (resumeText.trim().length < 100) {
-      return NextResponse.json(
-        { error: "Resume is too short. Please provide more content." },
-        { status: 400 }
-      );
-    }
-
-    if (jobDescription.trim().length < 50) {
-      return NextResponse.json(
-        {
-          error:
-            "Job description is too short. Please provide the full job posting.",
-        },
-        { status: 400 }
-      );
-    }
-
-    // Clean the texts
     const cleanedResume = resumeText
       .replace(/\r\n/g, "\n")
       .replace(/\n{3,}/g, "\n\n")
@@ -49,8 +51,12 @@ export async function POST(req: NextRequest) {
       .replace(/[ \t]+/g, " ")
       .trim();
 
-    // Call Gemini AI
     const matchResult = await matchResumeToJob(cleanedResume, cleanedJob);
+
+    // Track usage
+    if (userId) {
+      await trackUsage(userId, "jobMatch");
+    }
 
     return NextResponse.json({
       success: true,
@@ -60,7 +66,7 @@ export async function POST(req: NextRequest) {
     console.error("Job match error:", error);
     const message = error instanceof Error ? error.message : "Match failed";
     return NextResponse.json(
-      { error: `Failed to match job: ${message}. Please try again.` },
+      { error: `Failed to match job: ${message}` },
       { status: 500 }
     );
   }

@@ -45,22 +45,20 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Premium routes — redirect to signup instead of dashboard
-  const premiumRoutes = [
-    "/dashboard/interview",
-    "/dashboard/career",
-    "/dashboard/chat",
-    "/dashboard/messages",
-  ];
-  if (premiumRoutes.some((route) => pathname.startsWith(route))) {
-    if (!token) {
-      return NextResponse.redirect(new URL("/signin", request.url));
-    }
-    if (!["PREMIUM", "ADMIN"].includes(role)) {
-      return NextResponse.redirect(new URL("/pricing", request.url));
-    }
-    return NextResponse.next();
+  // Premium routes — allow access but show locked screen
+const premiumRoutes = [
+  "/dashboard/interview",
+  "/dashboard/career",
+  "/dashboard/chat",
+  "/dashboard/messages",
+];
+if (premiumRoutes.some((route) => pathname.startsWith(route))) {
+  if (!token) {
+    return NextResponse.redirect(new URL("/signin", request.url));
   }
+  // Let non-premium users see the locked page (they'll see LockedFeature component)
+  return NextResponse.next();
+}
 
   // Dashboard routes — allow all users to view (guest mode)
   // Don't redirect, just let them through
