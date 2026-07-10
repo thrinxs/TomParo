@@ -6,9 +6,10 @@ import { prisma } from "@/lib/prisma";
 // ── PATCH — Update job ─────────────────────────────────────────────────────────
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const session = await getServerSession(authOptions);
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -27,9 +28,8 @@ export async function PATCH(
       );
     }
 
-    // Ensure job belongs to this recruiter
     const existingJob = await prisma.jobPosting.findFirst({
-      where: { id: params.id, recruiterId: profile.id },
+      where: { id, recruiterId: profile.id },
     });
 
     if (!existingJob) {
@@ -42,7 +42,7 @@ export async function PATCH(
     const body = await req.json();
 
     const job = await prisma.jobPosting.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         title: body.title ?? existingJob.title,
         description: body.description ?? existingJob.description,
@@ -69,9 +69,10 @@ export async function PATCH(
 // ── DELETE — Delete job ────────────────────────────────────────────────────────
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const session = await getServerSession(authOptions);
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -91,7 +92,7 @@ export async function DELETE(
     }
 
     const existingJob = await prisma.jobPosting.findFirst({
-      where: { id: params.id, recruiterId: profile.id },
+      where: { id, recruiterId: profile.id },
     });
 
     if (!existingJob) {
@@ -102,7 +103,7 @@ export async function DELETE(
     }
 
     await prisma.jobPosting.delete({
-      where: { id: params.id },
+      where: { id },
     });
 
     return NextResponse.json({ success: true });
