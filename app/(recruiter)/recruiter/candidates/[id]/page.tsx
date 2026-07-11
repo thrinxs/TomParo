@@ -7,7 +7,7 @@ import {
   ArrowLeft, Mail, Phone, MapPin, Briefcase, GraduationCap,
   Globe, Star, AlertTriangle, Trophy, CheckCircle, XCircle,
   ChevronDown, ChevronUp, Zap, TrendingUp, BarChart3, Loader2,
-  ChevronRight, Send, Wand2, Paperclip, Info,
+  ChevronRight, Send, Wand2, Paperclip, Info, MessageSquare,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -280,10 +280,42 @@ export default function CandidateDetailPage() {
           <ChevronRight className="w-3 h-3" />
           <span className="text-white">{candidate.candidateName || "Unknown"}</span>
         </div>
-        <Link href="/recruiter/candidates" className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-white transition">
-          <ArrowLeft className="w-4 h-4" />
-          Back to Candidates
-        </Link>
+        <div className="flex items-center justify-between">
+          <Link href="/recruiter/candidates" className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-white transition">
+            <ArrowLeft className="w-4 h-4" />
+            Back to Candidates
+          </Link>
+          <Link
+            href={`/recruiter/interviews?startFor=${candidateId}`}
+            onClick={async (e) => {
+              e.preventDefault();
+              try {
+                const res = await fetch("/api/recruiter/interviews", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ candidateId, mode: "ASYNC" }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                  if (data.upgradeRequired) {
+                    toast.error("AI Interviews require Business plan or higher");
+                  } else {
+                    toast.error(data.error || "Failed to start interview");
+                  }
+                  return;
+                }
+                toast.success("Interview created! AI generated questions.");
+                window.location.href = `/recruiter/interviews/${data.interview.id}`;
+              } catch {
+                toast.error("Failed to start interview");
+              }
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 text-white text-sm font-semibold hover:bg-purple-500 transition"
+          >
+            <MessageSquare className="w-4 h-4" />
+            Start Interview
+          </Link>
+        </div>
       </div>
 
       {/* Top Card */}

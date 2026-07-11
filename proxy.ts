@@ -86,6 +86,11 @@ if (pathname.startsWith("/jobs")) {
     return NextResponse.next();
   }
 
+  // ── Public candidate interview pages ──────────────────────────────────────────
+  if (pathname.startsWith("/interview/")) {
+    return NextResponse.next();
+  }
+
   // ── Recruiter routes ───────────────────────────────────────────────────────
   // Invite accept page is public — must be accessible without auth
   if (pathname.startsWith("/recruiter/invite/accept")) {

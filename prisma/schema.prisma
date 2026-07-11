@@ -204,9 +204,10 @@ model RecruiterProfile {
   replyToEmail    String? 
   companySlug     String?   @unique   
   slugLocked      Boolean   @default(false) 
-  activityLogs  RecruiterActivityLog[]
-  teamMembers   RecruiterTeamMember[]
-  invites       RecruiterInvite[]
+  activityLogs    RecruiterActivityLog[]
+  teamMembers     RecruiterTeamMember[]
+  invites         RecruiterInvite[]
+  interviews      RecruiterInterview[]
 
   // Company Info
   companyName     String
@@ -234,6 +235,7 @@ model JobPosting {
   id              String    @id @default(cuid())
   recruiterId     String
   recruiter       RecruiterProfile @relation(fields: [recruiterId], references: [id], onDelete: Cascade)
+  interviews      RecruiterInterview[]
 
   // Job Details
   jobSlug         String?
@@ -263,6 +265,7 @@ model RecruiterCandidate {
   recruiterId     String
   recruiter       RecruiterProfile @relation(fields: [recruiterId], references: [id], onDelete: Cascade)
   emails          RecruiterEmail[]
+  interviews      RecruiterInterview[]
 
   // Optional link to a specific job
   jobId           String?
@@ -346,6 +349,7 @@ model RecruiterApplication {
   recruiterId     String
   recruiter       RecruiterProfile @relation(fields: [recruiterId], references: [id], onDelete: Cascade)
   cvFileUrl       String?
+  interviews      RecruiterInterview[]
 
   // Which job they applied for
   jobId           String?
@@ -461,4 +465,89 @@ enum InviteStatus {
   ACCEPTED
   EXPIRED
   CANCELLED
+}
+// ── Phase 5: Interview Enums ───────────────────────────────────────────────────
+
+enum InterviewStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum InterviewMode {
+  ASYNC
+  LIVE
+}
+
+enum QuestionType {
+  CV_VERIFICATION
+  LOCATION_BASED
+  JOB_SPECIFIC
+  BEHAVIOURAL
+}
+
+// ── Phase 5: Interviews ────────────────────────────────────────────────────────
+
+model RecruiterInterview {
+  id                    String            @id @default(cuid())
+  recruiterId           String
+  recruiter             RecruiterProfile  @relation(fields: [recruiterId], references: [id], onDelete: Cascade)
+  candidateId           String?
+  candidate             RecruiterCandidate? @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  applicationId         String?
+  application           RecruiterApplication? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  jobId                 String?
+  job                   JobPosting?       @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  mode                  InterviewMode     @default(ASYNC)
+  status                InterviewStatus   @default(PENDING)
+
+  candidateName         String
+  candidateEmail        String?
+  candidateLocation     String?
+  jobTitle              String?
+  cvSummary             String?           @db.Text
+
+  shareToken            String            @unique @default(cuid())
+
+  scheduledAt           DateTime?
+  startedAt             DateTime?
+  completedAt           DateTime?
+
+  summary               String?           @db.Text
+  finalScore            Int?
+  finalRecommendation   String?
+
+  totalQuestions        Int               @default(0)
+  answeredQuestions     Int               @default(0)
+
+  questions             RecruiterInterviewQuestion[]
+
+  createdAt             DateTime          @default(now())
+
+  @@index([recruiterId])
+  @@index([candidateId])
+  @@index([shareToken])
+  @@index([status])
+}
+
+model RecruiterInterviewQuestion {
+  id              String              @id @default(cuid())
+  interviewId     String
+  interview       RecruiterInterview  @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+
+  question        String              @db.Text
+  questionType    QuestionType        @default(BEHAVIOURAL)
+  order           Int
+
+  candidateAnswer String?             @db.Text
+  aiScore         Int?
+  aiFeedback      String?             @db.Text
+
+  answeredAt      DateTime?
+  createdAt       DateTime            @default(now())
+
+  @@index([interviewId])
+  @@index([order])
 }

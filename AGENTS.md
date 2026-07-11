@@ -69,7 +69,7 @@ tomparo/
 │ ├── (auth)/ # Auth pages (own layout, no navbar)
 │ │ ├── layout.tsx
 │ │ ├── signin/page.tsx # WORKING — toggle + password visibility + keep me signed in
-│ │ ├── signup/page.tsx # WORKING — toggle + password visibility
+│ │ ├── signup/page.tsx # WORKING — toggle + password visibility + invite flow
 │ │ └── forgot-password/page.tsx
 │ ├── (dashboard)/ # User dashboard (sidebar layout)
 │ │ ├── layout.tsx
@@ -101,11 +101,15 @@ tomparo/
 │ │ │ ├── page.tsx # Candidate list + bulk email UI (WORKING)
 │ │ │ └── [id]/page.tsx # Candidate detail + email panel + open tracking + history (WORKING)
 │ │ ├── pipeline/page.tsx # Kanban pipeline (WORKING)
+│ │ ├── analytics/page.tsx # Analytics dashboard (WORKING — Business+)
+│ │ ├── interviews/ # AI Interviews (PLANNED - Phase 5)
+│ │ │ ├── page.tsx # All interviews list
+│ │ │ └── [id]/page.tsx # Conduct/view interview
 │ │ ├── emails/page.tsx # AI emails (PLANNED - Growth+)
-│ │ ├── interviews/page.tsx # AI interviews (PLANNED - Business+)
 │ │ ├── autopilot/page.tsx # AI autopilot (PLANNED - Enterprise+)
-│ │ ├── analytics/page.tsx # Analytics (PLANNED - Business+)
-│ │ └── settings/page.tsx # Recruiter settings — company profile + username + reply-to (WORKING)
+│ │ ├── invite/
+│ │ │ └── accept/page.tsx # Team invite accept page (WORKING — PUBLIC)
+│ │ └── settings/page.tsx # Recruiter settings — company profile + username + reply-to + team (WORKING)
 │ ├── (admin)/
 │ ├── (staff)/
 │ ├── (support)/
@@ -143,7 +147,7 @@ tomparo/
 │ ├── user/profile/route.ts
 │ ├── user/usage/route.ts
 │ ├── user/history/route.ts
-│ ├── track/email-open/[emailId]/route.ts # Email open tracking pixel (WORKING)
+│ ├── track/email-open/[emailId]/route.ts # Email open tracking pixel (WORKING — PUBLIC)
 │ ├── jobs/ # PUBLIC — no auth required
 │ │ └── [companySlug]/
 │ │ ├── route.ts # GET company + active jobs
@@ -170,8 +174,18 @@ tomparo/
 │ ├── emails/generate/route.ts # POST AI generate email content
 │ ├── emails/history/route.ts # GET email history
 │ ├── emails/bulk/route.ts # POST bulk email to multiple candidates (Business+)
+│ ├── analytics/route.ts # GET full analytics data (WORKING — Business+)
+│ ├── activity/route.ts # GET activity log
+│ ├── interviews/route.ts # PLANNED Phase 5
+│ ├── interviews/[id]/route.ts # PLANNED Phase 5
+│ ├── interviews/[id]/answer/route.ts # PLANNED Phase 5
+│ ├── interviews/[id]/complete/route.ts # PLANNED Phase 5
 │ ├── settings/route.ts # GET + PATCH recruiter profile
-│ └── slug/check/route.ts # GET check company username availability
+│ ├── slug/check/route.ts # GET check company username availability
+│ ├── team/route.ts # GET members + POST invite (WORKING)
+│ ├── team/[id]/route.ts # PATCH role + DELETE member (WORKING)
+│ ├── team/invite/route.ts # GET public invite info by token (WORKING — PUBLIC)
+│ └── team/invite/accept/route.ts # POST accept invite (WORKING)
 ├── components/
 │ ├── Logo.tsx
 │ ├── Footer.tsx # Hides on /recruiter/ (not /recruiter-pricing)
@@ -182,7 +196,7 @@ tomparo/
 │ │ ├── Navbar.tsx
 │ │ ├── DashboardSidebar.tsx
 │ │ ├── DashboardTopbar.tsx
-│ │ ├── RecruiterSidebar.tsx # Includes Talent Pool nav item
+│ │ ├── RecruiterSidebar.tsx # Includes Talent Pool + Analytics nav items
 │ │ ├── RecruiterTopbar.tsx
 │ │ ├── AdminSidebar.tsx
 │ │ ├── StaffSidebar.tsx
@@ -225,6 +239,7 @@ tomparo/
 │ ├── usage-limiter.ts
 │ ├── paystack.ts
 │ ├── email.ts # Resend client — sends from hire@tomparo.com — tracking pixel support
+│ ├── activity-log.ts # Activity logging helper — logActivity()
 │ ├── supabase-storage.ts # Supabase Storage — uploadCV, getSignedUrl, deleteCV
 │ └── ai/
 │ ├── resume-analyzer.ts
@@ -235,6 +250,7 @@ tomparo/
 │ ├── application-generator.ts
 │ ├── skill-gap-engine.ts
 │ ├── interview-coach.ts
+│ ├── interview-engine.ts # PLANNED Phase 5
 │ ├── career-intelligence.ts
 │ ├── chat-assistant.ts
 │ └── providers/
@@ -299,6 +315,11 @@ tomparo/
 - **RecruiterCandidate** — recruiterId, jobId, fileName, rawText, candidateName, candidateEmail, candidatePhone, aiAnalysis (JSON), atsScore, status (enum), notes
 - **RecruiterApplication** — recruiterId, jobId, candidateName, candidateEmail, candidatePhone, coverLetter, cvText, cvFileName, cvFileUrl (Supabase Storage path), aiAnalysis (JSON), atsScore, aiSummary, source (form/email), status (enum)
 - **RecruiterEmail** — recruiterId, candidateId, type, to, subject, message, replyTo, ccSelf, hasAttachment, attachmentName, status, resendId, openedAt, openCount, createdAt
+- **RecruiterActivityLog** — recruiterId, type (ActivityType enum), title, description, meta (JSON string), createdAt
+- **RecruiterTeamMember** — recruiterId, userId, role (TeamRole enum), joinedAt
+- **RecruiterInvite** — recruiterId, email, role (TeamRole), token (unique), status (InviteStatus), expiresAt, createdAt, acceptedAt
+- **RecruiterInterview** — PLANNED Phase 5 — recruiterId, candidateId, jobId, mode (ASYNC/LIVE), status, location, summary, finalScore, finalRecommendation, scheduledAt, completedAt
+- **RecruiterInterviewQuestion** — PLANNED Phase 5 — interviewId, question, questionType, candidateAnswer, aiScore, aiFeedback, order
 
 ### Enums
 
@@ -306,6 +327,11 @@ tomparo/
 - **JobStatus:** DRAFT, ACTIVE, PAUSED, CLOSED
 - **CandidateStatus:** NEW, REVIEWED, SHORTLISTED, REJECTED, HIRED
 - **ApplicationStatus:** UNREAD, READ, SHORTLISTED, REJECTED, HIRED
+- **ActivityType:** CV_UPLOADED, CV_BULK_UPLOADED, JOB_CREATED, JOB_UPDATED, JOB_CLOSED, APPLICATION_RECEIVED, CANDIDATE_STATUS_CHANGED, EMAIL_SENT, BULK_EMAIL_SENT, TEAM_MEMBER_INVITED, TEAM_MEMBER_JOINED, TEAM_MEMBER_REMOVED, SETTINGS_UPDATED
+- **TeamRole:** OWNER, ADMIN, MEMBER
+- **InviteStatus:** PENDING, ACCEPTED, EXPIRED, CANCELLED
+- **InterviewStatus:** PENDING, IN_PROGRESS, COMPLETED, CANCELLED — PLANNED Phase 5
+- **InterviewMode:** ASYNC, LIVE — PLANNED Phase 5
 
 ---
 
@@ -331,6 +357,7 @@ tomparo/
 - `/` `/pricing` `/recruiter-pricing` `/privacy` `/terms` `/contact` `/about` `/how-it-works` `/faq` `/success-stories` → Public
 - `/jobs/*` → Public (candidate-facing apply pages)
 - `/api/track/*` → Public (email open tracking pixel)
+- `/recruiter/invite/accept` → Public (team invite accept page — no auth required)
 - `/signin` `/signup` `/forgot-password` → Auth (redirect if logged in, role-aware)
 - `/dashboard/*` → Must be logged in. Recruiters redirected to `/recruiter`
 - `/dashboard/interview` `/career` `/chat` `/messages` → LockedFeature for non-premium
@@ -352,51 +379,65 @@ tomparo/
 
 ## Recruiter Platform — Feature Tiers
 
-| Feature                            | Starter ₦5k | Growth ₦10k | Business ₦30k |   Enterprise ₦80k    |     Scale ₦150k      |
-| ---------------------------------- | :---------: | :---------: | :-----------: | :------------------: | :------------------: |
-| CVs / month                        |     20      |     50      |      200      |         500          |        1,000         |
-| Free trial CVs (FREE role)         |      2      |      —      |       —       |          —           |          —           |
-| Active job posts                   |      3      |     10      |      30       | Unlimited + Featured | Unlimited + Priority |
-| TalentPool (applications inbox)    |     ✅      |     ✅      |      ✅       |          ✅          |          ✅          |
-| Company username (apply email)     |     ✅      |     ✅      |      ✅       |          ✅          |          ✅          |
-| Individual CV upload + AI analysis |     ✅      |     ✅      |      ✅       |          ✅          |          ✅          |
-| AI candidate ranking               |     ✅      |     ✅      |      ✅       |          ✅          |          ✅          |
-| Bulk ZIP upload                    |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
-| Duplicate CV detection             |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
-| Red flag detection                 |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
-| Verified employer badge            |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
-| Hiring pipeline (Kanban)           |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
-| Notes & ratings                    |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
-| AI rejection letter                |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
-| AI interview invite email          |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
-| AI hiring offer email              |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
-| AI follow-up & waitlist email      |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
-| Bulk email sending                 |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| Email open tracking                |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| Vacancy poster + social caption    |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| Text interview                     |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| Voice interview                    |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| Video interview                    |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| AI generates questions             |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| Per-answer AI scoring              |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| Interview summary                  |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| Interview recording                |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| AI hire recommendation             |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| Watch live pipeline                |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| AI employment letter (PDF + DOCX)  |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| AI offer letter (PDF + DOCX)       |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| Analytics dashboard                |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
-| Full autopilot mode                |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
-| Company branding on video          |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
-| AI NDA generation                  |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
-| Culture fit score                  |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
-| Featured job badge                 |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
-| Simultaneous autopilots            |     ❌      |     ❌      |      ❌       |          10          |      Unlimited       |
-| Team seats                         |      1      |      2      |       5       |          10          |          25          |
-| API access                         |     ❌      |     ❌      |      ❌       |          ❌          |          ✅          |
-| White-label documents              |     ❌      |     ❌      |      ❌       |          ❌          |          ✅          |
-| SLA guarantee                      |     ❌      |     ❌      |      ❌       |          ❌          |          ✅          |
-| Dedicated account manager          |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
+| Feature                               | Starter ₦5k | Growth ₦10k | Business ₦30k |   Enterprise ₦80k    |     Scale ₦150k      |
+| ------------------------------------- | :---------: | :---------: | :-----------: | :------------------: | :------------------: |
+| CVs / month                           |     20      |     50      |      200      |         500          |        1,000         |
+| Free trial CVs (FREE role)            |      2      |      —      |       —       |          —           |          —           |
+| Active job posts                      |      3      |     10      |      30       | Unlimited + Featured | Unlimited + Priority |
+| TalentPool (applications inbox)       |     ✅      |     ✅      |      ✅       |          ✅          |          ✅          |
+| Company username (apply email)        |     ✅      |     ✅      |      ✅       |          ✅          |          ✅          |
+| Individual CV upload + AI analysis    |     ✅      |     ✅      |      ✅       |          ✅          |          ✅          |
+| AI candidate ranking                  |     ✅      |     ✅      |      ✅       |          ✅          |          ✅          |
+| Activity log                          |     ✅      |     ✅      |      ✅       |          ✅          |          ✅          |
+| Bulk ZIP upload                       |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
+| Duplicate CV detection                |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
+| Red flag detection                    |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
+| Verified employer badge               |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
+| Hiring pipeline (Kanban)              |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
+| Notes & ratings                       |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
+| AI rejection letter                   |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
+| AI interview invite email             |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
+| AI hiring offer email                 |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
+| AI follow-up & waitlist email         |     ❌      |     ✅      |      ✅       |          ✅          |          ✅          |
+| Bulk email sending                    |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Email open tracking                   |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Analytics dashboard                   |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Text interview                        |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Voice interview                       |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Video interview                       |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| AI generates questions                |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Per-answer AI scoring                 |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Interview summary                     |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Interview scheduler                   |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Calendar integration (Google/Outlook) |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Interview recording                   |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| AI hire recommendation                |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Watch live pipeline                   |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| AI candidate comparison               |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Candidate timeline                    |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| AI notes summary                      |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Vacancy poster + social caption       |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| AI employment letter (PDF + DOCX)     |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| AI offer letter (PDF + DOCX)          |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Extra HR documents                    |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| HR policies generator                 |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Employee handbook generator           |     ❌      |     ❌      |      ✅       |          ✅          |          ✅          |
+| Hiring cost dashboard                 |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
+| Full autopilot mode                   |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
+| Company branding on video             |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
+| AI NDA generation                     |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
+| Culture fit score                     |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
+| Featured job badge                    |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
+| Employer branding pages               |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
+| AI candidate search                   |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
+| Simultaneous autopilots               |     ❌      |     ❌      |      ❌       |          10          |      Unlimited       |
+| AI performance review                 |     ❌      |     ❌      |      ❌       |          ❌          |          ✅          |
+| Internal recruitment                  |     ❌      |     ❌      |      ❌       |          ❌          |          ✅          |
+| Team seats                            |      1      |      2      |       5       |          10          |          25          |
+| API access                            |     ❌      |     ❌      |      ❌       |          ❌          |          ✅          |
+| White-label documents                 |     ❌      |     ❌      |      ❌       |          ❌          |          ✅          |
+| SLA guarantee                         |     ❌      |     ❌      |      ❌       |          ❌          |          ✅          |
+| Dedicated account manager             |     ❌      |     ❌      |      ❌       |          ✅          |          ✅          |
 
 ---
 
@@ -509,6 +550,58 @@ Stage 1: Job Creation → Stage 2: CV Screening → Stage 3: Interview Invite �
 - Results displayed inline: ✅ sent / ❌ failed per candidate
 - Returns summary: { total, successful, failed }
 
+### Analytics Dashboard (Business+)
+
+- API: `GET /api/recruiter/analytics`
+- Plan-gated: Business+ — returns 403 for lower plans, page shows lock screen
+- Stats: CVs (total, this month, last month, % change), Applications (same), Jobs (total, active, closed)
+- Email stats: total sent, opened, open rate %, this month
+- Pipeline breakdown: New / Reviewed / Shortlisted / Rejected / Hired with percentages + hire rate
+- Top performing jobs (by application count, top 5)
+- Recent activity feed (last 20 actions from RecruiterActivityLog)
+- Team count
+
+### Activity Log
+
+- Model: `RecruiterActivityLog` — recruiterId, type, title, description, meta (JSON), createdAt
+- Helper: `lib/activity-log.ts → logActivity()` — silently fails, never breaks main flow
+- Auto-logged on: CV upload, bulk CV upload, job created, job updated, job closed, application received, candidate status changed, email sent, bulk email sent, team member invited, team member joined, team member removed, settings updated
+- API: `GET /api/recruiter/activity?limit=50&type=xxx`
+
+### Team Seats + Invite Flow
+
+- Model: `RecruiterTeamMember` — recruiterId, userId, role (OWNER/ADMIN/MEMBER), joinedAt
+- Model: `RecruiterInvite` — recruiterId, email, role, token (unique cuid), status, expiresAt (7 days)
+- Seat limits by plan: Starter=1, Growth=2, Business=5, Enterprise=10, Scale=25, Custom=unlimited
+- **Invite flow:**
+  - Recruiter sends invite from `/recruiter/settings` → POST /api/recruiter/team
+  - Invite email sent via Resend with link to `/recruiter/invite/accept?token=xxx`
+  - Accept page is PUBLIC (added to proxy.ts exceptions)
+  - Accept page loads invite info via `GET /api/recruiter/team/invite?token=xxx` (public)
+  - Accept page shows: company name, invited email, role, expiry, what they can/cannot do
+  - "Create Account & Join Team" → `/signup?inviteToken=xxx&email=xxx&company=xxx`
+  - Signup page detects `inviteToken` → shows invite context banner, locks email + company name fields
+  - After signup → auto signs in → redirected back to `/recruiter/invite/accept?token=xxx`
+  - Invite accepted → "You're in! 🎉" → redirected to `/recruiter` dashboard
+  - "Already have account?" → `/signin?callbackUrl=/recruiter/invite/accept?token=xxx`
+- Team role permissions:
+  - OWNER/ADMIN: can invite/remove members, change settings, full access
+  - MEMBER: can upload CVs, manage jobs, send emails, view analytics — cannot manage team or billing
+
+### Phase 5 — AI Text Interviews (PLANNED)
+
+- Question generation based on 4 sources:
+  1. CV verification — questions that verify CV content ("You listed 3 years at Zenith Bank — describe your key responsibilities")
+  2. Location-based — questions relevant to candidate's city/country (from CV aiAnalysis.candidateLocation + application form)
+  3. Job description — questions based on job requirements and responsibilities
+  4. Behavioural / culture fit
+- Both modes: ASYNC (candidate answers on own time via shareable link) + LIVE (recruiter conducts in real time)
+- 8-10 questions per interview
+- Per-answer AI scoring (0-10 + detailed feedback)
+- Final AI summary + hire recommendation after all answers submitted
+- Interview launched from: candidate detail page ("Start Interview" button) + /recruiter/interviews sidebar
+- Interview statuses: PENDING → IN_PROGRESS → COMPLETED / CANCELLED
+
 ### Yearly Pricing Toggle
 
 - Recruiter pricing page has Monthly / Yearly toggle
@@ -524,17 +617,19 @@ Stage 1: Job Creation → Stage 2: CV Screening → Stage 3: Interview Invite �
 - Options: Accept All / Reject / Learn more (shows cookie categories)
 - Added to root `app/layout.tsx`
 
-### Auth Pages — New Features
+### Auth Pages — Features
 
 - **Password visibility toggle** — Eye/EyeOff icon on all password fields (signin + signup)
 - **Keep me signed in** — checkbox on signin, saves to localStorage
 - Both pages have Job Seeker (blue) / Recruiter (purple) toggle
+- **Invite flow** — signup detects inviteToken in URL params, shows invite context banner, locks email + company name fields, redirects to invite accept after signup
 
 ### Recruiter Settings Page (/recruiter/settings)
 
 - Company Profile (name, size, industry, website, description)
 - Company Username — live availability check, confirm button (saves independently)
 - Email Reply Settings — reply-to email for candidate replies + CC copies
+- Team Management — invite by email, role select, seat count display, pending invites, remove members
 - Save Settings button — turns green + "Settings Saved!" for 3 seconds on success
 
 ### Next.js 16 — params is a Promise (CRITICAL)
@@ -714,6 +809,7 @@ Landing page, Consumer Pricing (monthly/yearly), Recruiter Pricing (monthly/year
 - Cookie consent banner (WORKING)
 - Forgot password (UI ready, needs email service)
 - NextAuth JWT sessions with recruiter flags
+- Team invite signup flow — company name pre-filled + locked, email pre-filled + locked (WORKING)
 
 **Job Seeker Dashboard (All WORKING):**
 CV upload + AI analysis, Job matching, Cover letter (DOCX), Application email (3 styles, DOCX), Skill gap analysis, Interview Coach (Premium), Career AI (Premium), AI Chat (Premium), Priority Support (Premium), History, Settings, Usage tracking
@@ -750,44 +846,120 @@ CV upload + AI analysis, Job matching, Cover letter (DOCX), Application email (3
 - Email open tracking — 1×1 pixel, openedAt + openCount, "✅ Opened" badge in history
 - Bulk email sending — select candidates, compose, AI personalize, send to up to 50, results display
 
-### ⏳ Recruiter Phases Remaining
+**Recruiter Platform — Phase 4 ✅ COMPLETE:**
 
-**Phase 4: Analytics & Team**
+- Analytics dashboard (Business+) — CVs, applications, jobs, emails, pipeline breakdown, hire rate, top jobs, activity feed
+- Activity log — auto-logged on all key recruiter actions
+- Team seats — plan-gated seat limits, invite by email, role-based access (Owner/Admin/Member)
+- Team invite flow:
+  - Invite email sent via Resend
+  - Accept page (PUBLIC) shows company details + role + permissions
+  - "Create Account" → signup page with company pre-filled + locked
+  - After signup → auto-accepted → /recruiter dashboard
+  - "Already have account?" → signin → back to accept
 
-- Analytics dashboard (Business+), team seats, activity log
+---
 
-**Phase 5: AI Interviews**
+## ⏳ Remaining Phases
 
-- Text, voice, video interviews (Business+)
-- AI question generation, scoring, recording, shareable links
+### Phase 5: AI Interviews (Business+)
 
-**Phase 6: AI Autopilot (Enterprise+)**
+- [ ] Schema: RecruiterInterview + RecruiterInterviewQuestion + InterviewStatus + InterviewMode enums
+- [ ] lib/ai/interview-engine.ts — generate questions (CV verification + location + job + behavioural), score answers (0-10 + feedback), generate final summary + hire recommendation
+- [ ] POST /api/recruiter/interviews — create interview + AI generates questions
+- [ ] GET /api/recruiter/interviews — list all interviews
+- [ ] GET /api/recruiter/interviews/[id] — get interview + all questions
+- [ ] POST /api/recruiter/interviews/[id]/answer — submit one answer → AI scores instantly
+- [ ] POST /api/recruiter/interviews/[id]/complete — AI generates final summary + recommendation
+- [ ] DELETE /api/recruiter/interviews/[id]
+- [ ] /recruiter/interviews page — all interviews list with status + scores
+- [ ] /recruiter/interviews/[id] page — conduct/view interview (both ASYNC + LIVE modes)
+- [ ] Update candidate detail page — "Start Interview" button
+- [ ] Interview scheduler — pick date/time, generate meeting link, send to candidate, candidate confirms
+- [ ] Calendar integration — Google Calendar + Outlook
+- [ ] Candidate timeline view — Applied → Reviewed → Interviewed → Offer → Hired
+- [ ] AI notes summary — multiple interviewers leave notes → AI summarizes into one recommendation
+- [ ] Voice interviews (after text is complete)
+- [ ] Video interviews (after voice is complete)
 
-- Full 7-stage autonomous pipeline
-- AI documents (employment letter, offer letter, NDA) as PDF + DOCX
+### Phase 6: AI Autopilot + Documents (Enterprise+)
 
-**Phase 7: Marketplace**
+- [ ] Full 7-stage autonomous pipeline
+- [ ] AI employment letter (PDF + DOCX)
+- [ ] AI offer letter (PDF + DOCX)
+- [ ] AI NDA generation
+- [ ] Extra HR documents: promotion letter, confirmation letter, probation letter, warning letter, termination letter, exit letter, experience letter, recommendation letter, internship letter
+- [ ] HR policies generator (leave policy, remote work policy, code of conduct, attendance policy)
+- [ ] Employee handbook generator (one-click)
+- [ ] Company branding on video
+- [ ] Culture fit score
+- [ ] Featured job badge
+- [ ] AI performance review (manager writes notes → AI generates formal review)
+- [ ] Hiring cost dashboard (cost per hire, time to hire, offer acceptance rate)
 
-- Public /jobs listing, company profiles, candidate database search
+### Phase 7: Marketplace + Employer Branding
 
-**Future:**
+- [ ] Public /jobs marketplace listing
+- [ ] Employer branding pages — tomparo.com/company/[slug] — logo, banner, culture, benefits, photos, videos, office locations, social links
+- [ ] Company profile pages
+- [ ] Candidate database search (natural language — "Find backend dev with 5 years in Lagos")
+- [ ] AI candidate comparison (side by side — AI explains strengths and trade-offs)
+- [ ] Internal recruitment (existing employees apply to internal roles)
 
-- Career Compass (₦1,000/use, ₦200 for Premium)
-- AI Vacancy Poster + social media caption
-- Password reset with actual emails
-- Auto Job Discovery (85%+ CV matches)
-- WhatsApp notifications (Termii)
-- Blog with career tips (SEO)
+### Phase 8: Job Seeker Power Features
+
+- [ ] Career Compass (₦1,000/use, ₦200 for Premium)
+- [ ] AI Salary Negotiation Coach — practice salary negotiation, counter offers, responses
+- [ ] Career Tracker — track applications, interviews, rejections, offers + insights (avg response time, etc.)
+- [ ] Career Goals + Roadmap — "I want to be a Data Scientist" → AI creates learning + skills roadmap + timeline
+- [ ] Portfolio Builder — especially for designers, developers, writers
+- [ ] AI Career Passport — living professional profile: CV + skills + AI assessments + interview scores + certifications + portfolio + work history + career goals. Candidates send a rich profile, not just a PDF.
+- [ ] Auto Job Discovery (85%+ CV match alerts)
+- [ ] Job Alerts (email, WhatsApp, push notifications)
+
+### Phase 9: Enterprise + API
+
+- [ ] AI HR Assistant (chat-based — "Generate a warning letter", "Which employees are due for appraisal?")
+- [ ] AI Onboarding — post-hire: documents, tasks, training schedule
+- [ ] AI Job Description Library (thousands of templates)
+- [ ] API access (B2B — partners integrate TomParo AI into their own platforms)
+- [ ] White-label documents
+- [ ] SLA guarantee
+- [ ] Dedicated account manager
+
+### Future / Ongoing
+
+- [ ] Password reset with actual emails (Resend — API route exists, email not wired)
+- [ ] AI Vacancy Poster + social media caption (Business+)
+- [ ] WhatsApp notifications (Termii)
+- [ ] Blog with career tips (SEO)
+- [ ] Google Calendar + Outlook integration
 
 ---
 
 ## Migration History
 
-### Phase 3 Communication + Email Tracking + Bulk Email (Latest)
+### Phase 4 — Analytics, Team Seats, Activity Log (Latest)
+
+- Added RecruiterActivityLog, RecruiterTeamMember, RecruiterInvite models to schema
+- Added ActivityType, TeamRole, InviteStatus enums
+- Added relations to RecruiterProfile + User
+- Built analytics dashboard (/recruiter/analytics) — Business+ plan-gated with lock screen for lower plans
+- Built activity log API (/api/recruiter/activity)
+- Built team API: GET/POST /api/recruiter/team, PATCH/DELETE /api/recruiter/team/[id]
+- Built public invite lookup: GET /api/recruiter/team/invite?token=xxx (no auth)
+- Built invite accept API: POST /api/recruiter/team/invite/accept
+- Built invite accept page (/recruiter/invite/accept) — added as PUBLIC route in proxy.ts
+- Updated signup page — detects inviteToken, shows invite context banner, locks email + company name
+- Added team management section to /recruiter/settings (invite form, members list, pending invites, seat counter)
+- Added lib/activity-log.ts helper — silently fails, never breaks main flow
+- Wired activity logging into: CV upload, bulk upload, job create, email sent, bulk email, candidate status change
+
+### Phase 3 Communication + Email Tracking + Bulk Email
 
 - Added Resend email service (lib/email.ts) with tracking pixel support
 - Added Supabase Storage for CV files (lib/supabase-storage.ts)
-- Added RecruiterEmail table for email history (with openedAt, openCount fields)
+- Added RecruiterEmail table (with openedAt, openCount fields)
 - Added RecruiterApplication table for TalentPool
 - Added companySlug + slugLocked to RecruiterProfile
 - Added jobSlug to JobPosting
@@ -830,7 +1002,9 @@ CV upload + AI analysis, Job matching, Cover letter (DOCX), Application email (3
 
 ## Vision
 
-TomParo is building Nigeria's first AI-native job marketplace — connecting job seekers with employers through intelligent matching, career coaching, and autonomous hiring tools.
+TomParo is building Nigeria's first AI-native job marketplace and career intelligence platform — connecting job seekers with employers through intelligent matching, career coaching, and autonomous hiring tools.
+
+Long-term vision: The **AI Career Passport** becomes every professional's living career identity — a rich, continuously updated profile containing CV, skills, AI assessments, interview scores, certifications, portfolio, work history, and career goals. When candidates apply, employers receive a structured living profile — not just a PDF.
 
 ### Revenue Projections
 
@@ -879,3 +1053,13 @@ TomParo is building Nigeria's first AI-native job marketplace — connecting job
 - **Bulk email plan gate:** Business+ only — returns upgradeRequired: true for lower plans
 - **Email status states:** "sent" → "opened" (on pixel fire) or "failed"
 - **openCount increments:** Each pixel load = +1 — multiple opens tracked
+- **Team invite accept page:** PUBLIC route — added `/recruiter/invite/accept` exception to proxy.ts BEFORE the recruiter auth check
+- **Team invite token lookup:** GET /api/recruiter/team/invite?token=xxx — public, no auth required
+- **Invite signup flow:** Detects inviteToken in URL → shows invite banner → locks email + company name → after signup redirects back to accept page → invite auto-accepted
+- **Team seat limits:** Starter=1, Growth=2, Business=5, Enterprise=10, Scale=25, Custom/Admin=unlimited
+- **Team roles:** OWNER/ADMIN can invite/remove/manage settings. MEMBER can use dashboard features but not team/billing
+- **Activity logging:** Always use logActivity() helper — silently fails, never breaks main flow
+- **Analytics plan gate:** Business+ only — GET /api/recruiter/analytics returns 403 for lower plans
+- **Interview questions based on:** CV content verification + candidate location (CV + application form) + job description + behavioural
+- **Interview modes:** ASYNC (candidate answers alone via shareable link) + LIVE (recruiter conducts in real time)
+- **Interview location source:** CV aiAnalysis.candidateLocation field + application form location field
