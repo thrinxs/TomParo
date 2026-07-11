@@ -63,7 +63,7 @@ export default function InterviewDetailPage() {
 
   useEffect(() => {
     setIsSpeechSupported(
-      !!(window.SpeechRecognition || (window as any).webkitSpeechRecognition)
+      !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
     );
   }, []);
 

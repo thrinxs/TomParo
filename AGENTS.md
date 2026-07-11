@@ -40,7 +40,7 @@ TomParo is an AI-powered career intelligence platform that helps job seekers get
 - **Auth:** NextAuth.js (JWT strategy, credentials + Google)
 - **Payments:** Paystack (Nigerian payments, INTEGRATED and WORKING)
 - **Email Service:** Resend (INTEGRATED — sends from hire@tomparo.com)
-- **File Storage:** Supabase Storage (CVs stored in `cvs` bucket)
+- **File Storage:** Supabase Storage (CVs in `cvs` bucket, interview recordings in `recordings` bucket)
 - **Live Chat:** Tawk.to (INTEGRATED and WORKING)
 - **Markdown:** react-markdown + remark-gfm (for AI Chat premium formatting)
 - **Icons:** Lucide React
@@ -54,6 +54,9 @@ TomParo is an AI-powered career intelligence platform that helps job seekers get
 - **State Management:** Zustand
 - **Password Hashing:** bcryptjs
 - **Supabase JS Client:** @supabase/supabase-js (for Storage)
+- **Speech Synthesis:** Web Speech API — SpeechSynthesis (built into browser, FREE, no API key)
+- **Speech Recognition:** Web Speech API — SpeechRecognition (built into Chrome/Edge, FREE, no API key)
+- **Session Recording:** MediaRecorder API (built into browser, FREE, no API key)
 - **Deployment:** Vercel (with auto-deploy from GitHub main branch)
 
 ---
@@ -98,23 +101,25 @@ tomparo/
 │ │ │ ├── new/page.tsx # Create job with AI write/review (WORKING)
 │ │ │ └── [id]/edit/page.tsx # Edit job (WORKING)
 │ │ ├── candidates/
-│ │ │ ├── page.tsx # UPDATED — Interview button per card + InterviewModeModal + Bulk Interview panel + Select all by category
+│ │ │ ├── page.tsx # UPDATED — Interview button + InterviewModeModal + Bulk Interview + select by category
 │ │ │ └── [id]/page.tsx # Candidate detail + email panel + open tracking + history (WORKING)
 │ │ ├── pipeline/page.tsx # Kanban pipeline (WORKING)
 │ │ ├── analytics/page.tsx # Analytics dashboard (WORKING — Business+)
-│ │ ├── interviews/ # AI Interviews (🚧 IN PROGRESS - Phase 5)
-│ │ │ ├── page.tsx # All interviews list (PLANNED)
-│ │ │ ├── new/page.tsx # Create interview — receives candidateId + mode from candidates page (PLANNED)
-│ │ │ ├── bulk/page.tsx # Bulk interview creation — receives ids + mode query params (PLANNED)
-│ │ │ └── [id]/page.tsx # Conduct/view interview (PLANNED)
+│ │ ├── interviews/ # AI Interviews — Phase 5 ✅ COMPLETE
+│ │ │ ├── page.tsx # All interviews list (WORKING)
+│ │ │ ├── new/page.tsx # UPDATED — Type + Mode + per-interview messages (WORKING)
+│ │ │ ├── bulk/page.tsx # UPDATED — Type + Mode + bulk create with progress (WORKING)
+│ │ │ └── [id]/page.tsx # UPDATED — Go Live + live panel + recording player + skipped questions (WORKING)
 │ │ ├── emails/page.tsx # AI emails (PLANNED - Growth+)
 │ │ ├── autopilot/page.tsx # AI autopilot (PLANNED - Enterprise+)
 │ │ ├── invite/
 │ │ │ └── accept/page.tsx # Team invite accept page (WORKING — PUBLIC)
-│ │ └── settings/page.tsx # Recruiter settings — company profile + username + reply-to + team (WORKING)
+│ │ └── settings/page.tsx # UPDATED — global interview message template section (WORKING)
 │ ├── (admin)/
 │ ├── (staff)/
 │ ├── (support)/
+│ ├── interview/
+│ │ └── [token]/page.tsx # FULL REWRITE — setup screen + voice call engine + text mode + recording + live detection
 │ ├── jobs/ # PUBLIC — candidate-facing pages
 │ │ └── [companySlug]/
 │ │ ├── page.tsx # Company jobs listing (WORKING)
@@ -150,6 +155,8 @@ tomparo/
 │ ├── user/usage/route.ts
 │ ├── user/history/route.ts
 │ ├── track/email-open/[emailId]/route.ts # Email open tracking pixel (WORKING — PUBLIC)
+│ ├── interview-session/
+│ │ └── [token]/route.ts # UPDATED — returns interviewType, CV data, messages, isLive, liveMessage (PUBLIC)
 │ ├── jobs/ # PUBLIC — no auth required
 │ │ └── [companySlug]/
 │ │ ├── route.ts # GET company + active jobs
@@ -178,10 +185,13 @@ tomparo/
 │ ├── emails/bulk/route.ts # POST bulk email to multiple candidates (Business+)
 │ ├── analytics/route.ts # GET full analytics data (WORKING — Business+)
 │ ├── activity/route.ts # GET activity log
-│ ├── interviews/route.ts # 🚧 IN PROGRESS Phase 5
-│ ├── interviews/[id]/route.ts # 🚧 IN PROGRESS Phase 5
-│ ├── interviews/[id]/answer/route.ts # PLANNED Phase 5
-│ ├── interviews/[id]/complete/route.ts # PLANNED Phase 5
+│ ├── interview-settings/route.ts # NEW — GET + PATCH global interview message template
+│ ├── interviews/route.ts # WORKING — POST create + GET list
+│ ├── interviews/[id]/route.ts # WORKING — GET single + DELETE
+│ ├── interviews/[id]/answer/route.ts # WORKING — POST submit answer + skipped flag
+│ ├── interviews/[id]/complete/route.ts # WORKING — POST generate final summary
+│ ├── interviews/[id]/go-live/route.ts # NEW — PATCH isLive + liveMessage
+│ ├── interviews/[id]/recording/route.ts # NEW — POST upload + GET signed URL
 │ ├── settings/route.ts # GET + PATCH recruiter profile
 │ ├── slug/check/route.ts # GET check company username availability
 │ ├── team/route.ts # GET members + POST invite (WORKING)
@@ -252,7 +262,7 @@ tomparo/
 │ ├── application-generator.ts
 │ ├── skill-gap-engine.ts
 │ ├── interview-coach.ts
-│ ├── interview-engine.ts # 🚧 IN PROGRESS Phase 5 — question array parsing fixed, question generation underway
+│ ├── interview-engine.ts # WORKING — generateInterviewQuestions, scoreInterviewAnswer, generateInterviewSummary
 │ ├── career-intelligence.ts
 │ ├── chat-assistant.ts
 │ └── providers/
@@ -313,6 +323,7 @@ tomparo/
 ### Recruiter Tables
 
 - **RecruiterProfile** — userId, companyName, companySize, industry, website, logo, description, cvsUsedThisMonth, cvsResetDate, replyToEmail, companySlug (unique), slugLocked, slugChangeRequested
+- **RecruiterInterviewSettings** — recruiterId (unique), globalOpening, globalOpeningType (MessageType), globalOpeningUrl, globalClosing, globalClosingType (MessageType), globalClosingUrl, globalInstructions (JSON array), updatedAt
 - **JobPosting** — recruiterId, jobSlug, title, description, requirements, location, type (enum), salaryMin, salaryMax, salaryCurrency, deadline, status (enum)
 - **RecruiterCandidate** — recruiterId, jobId, fileName, rawText, candidateName, candidateEmail, candidatePhone, aiAnalysis (JSON), atsScore, status (enum), notes
 - **RecruiterApplication** — recruiterId, jobId, candidateName, candidateEmail, candidatePhone, coverLetter, cvText, cvFileName, cvFileUrl (Supabase Storage path), aiAnalysis (JSON), atsScore, aiSummary, source (form/email), status (enum)
@@ -320,8 +331,32 @@ tomparo/
 - **RecruiterActivityLog** — recruiterId, type (ActivityType enum), title, description, meta (JSON string), createdAt
 - **RecruiterTeamMember** — recruiterId, userId, role (TeamRole enum), joinedAt
 - **RecruiterInvite** — recruiterId, email, role (TeamRole), token (unique), status (InviteStatus), expiresAt, createdAt, acceptedAt
-- **RecruiterInterview** — PLANNED Phase 5 — recruiterId, candidateId, jobId, mode (ASYNC/LIVE), status, location, summary, finalScore, finalRecommendation, scheduledAt, completedAt
-- **RecruiterInterviewQuestion** — PLANNED Phase 5 — interviewId, question, questionType, candidateAnswer, aiScore, aiFeedback, order
+- **RecruiterInterview** — Full Phase 5 model (see fields below)
+- **RecruiterInterviewQuestion** — interviewId, question, questionType (QuestionType), order, candidateAnswer, aiScore, aiFeedback, skipped (Boolean), answeredAt
+
+### RecruiterInterview — Full Field List (Phase 5)
+
+- id, recruiterId, candidateId, applicationId, jobId
+- interviewType InterviewType @default(TEXT) — TEXT / VOICE / VIDEO
+- mode InterviewMode @default(ASYNC) — ASYNC / LIVE
+- status InterviewStatus @default(PENDING)
+- isLive Boolean @default(false) — recruiter has taken over async interview
+- liveStartedAt DateTime?
+- liveMessage String? — recruiter types/dictates → AI reads aloud to candidate
+- candidateName, candidateEmail, candidateLocation, jobTitle, cvSummary
+- openingMessage String? — per-interview opening (overrides global template)
+- openingMessageType MessageType @default(TEXT)
+- openingMessageUrl String?
+- closingMessage String? — per-interview closing (overrides global template)
+- closingMessageType MessageType @default(TEXT)
+- closingMessageUrl String?
+- customInstructions String? — JSON array of {trigger, message, questionIndex?, questionType?, afterMinutes?}
+- recordingUrl String? — Supabase Storage path in `recordings` bucket
+- recordingUploadedAt DateTime?
+- shareToken String @unique @default(cuid())
+- scheduledAt, startedAt, completedAt
+- summary, finalScore, finalRecommendation
+- totalQuestions Int @default(0), answeredQuestions Int @default(0)
 
 ### Enums
 
@@ -332,8 +367,11 @@ tomparo/
 - **ActivityType:** CV_UPLOADED, CV_BULK_UPLOADED, JOB_CREATED, JOB_UPDATED, JOB_CLOSED, APPLICATION_RECEIVED, CANDIDATE_STATUS_CHANGED, EMAIL_SENT, BULK_EMAIL_SENT, TEAM_MEMBER_INVITED, TEAM_MEMBER_JOINED, TEAM_MEMBER_REMOVED, SETTINGS_UPDATED
 - **TeamRole:** OWNER, ADMIN, MEMBER
 - **InviteStatus:** PENDING, ACCEPTED, EXPIRED, CANCELLED
-- **InterviewStatus:** PENDING, IN_PROGRESS, COMPLETED, CANCELLED — PLANNED Phase 5
-- **InterviewMode:** ASYNC, LIVE — PLANNED Phase 5
+- **InterviewStatus:** PENDING, IN_PROGRESS, COMPLETED, CANCELLED
+- **InterviewMode:** ASYNC, LIVE
+- **InterviewType:** TEXT, VOICE, VIDEO
+- **MessageType:** TEXT, AUDIO, VIDEO
+- **QuestionType:** CV_VERIFICATION, LOCATION_BASED, JOB_SPECIFIC, BEHAVIOURAL
 
 ---
 
@@ -358,7 +396,9 @@ tomparo/
 
 - `/` `/pricing` `/recruiter-pricing` `/privacy` `/terms` `/contact` `/about` `/how-it-works` `/faq` `/success-stories` → Public
 - `/jobs/*` → Public (candidate-facing apply pages)
+- `/interview/*` → Public (candidate interview session — no auth required)
 - `/api/track/*` → Public (email open tracking pixel)
+- `/api/interview-session/*` → Public (candidate loads interview via share token)
 - `/recruiter/invite/accept` → Public (team invite accept page — no auth required)
 - `/signin` `/signup` `/forgot-password` → Auth (redirect if logged in, role-aware)
 - `/dashboard/*` → Must be logged in. Recruiters redirected to `/recruiter`
@@ -501,6 +541,158 @@ Stage 1: Job Creation → Stage 2: CV Screening → Stage 3: Interview Invite �
 - Bulk Interview confirm navigates to `/recruiter/interviews/bulk?ids=xxx,xxx&mode=ASYNC|LIVE`
 - Candidates without email addresses cannot be selected (checkbox disabled, "No email" label shown)
 
+### Interview Type System (WORKING)
+
+| Type      | Candidate Experience                                                                    |
+| --------- | --------------------------------------------------------------------------------------- |
+| **TEXT**  | Types answers in textarea — any device, any browser                                     |
+| **VOICE** | AI reads questions aloud, candidate speaks answers, silence detection auto-manages flow |
+| **VIDEO** | Camera + mic recording per question (recording infra ready, UI coming)                  |
+
+- Set by recruiter on `new/page.tsx` or `bulk/page.tsx`
+- Stored in `RecruiterInterview.interviewType`
+- Candidate page (`/interview/[token]`) reads `interviewType` and renders correct UI automatically
+
+### Voice Call Interview System (WORKING)
+
+**Technology — all FREE, no API keys, built into browser:**
+
+- `SpeechSynthesis` — AI reads questions aloud
+- `SpeechRecognition` — candidate speaks, transcribed to text
+- `MediaRecorder` — records full session audio
+- Works on Chrome + Edge. HTTPS required — works on tomparo.com, may fail on localhost
+
+**Setup screen (before interview starts):**
+
+- Gender selection: Male / Female / Prefer not to say
+- Date of birth input (min age 16)
+- Recording consent notice shown
+- Tips shown for voice interviews
+
+**Gender-matched AI voice:**
+
+- Detects gender from candidate's first name (200+ name list including Nigerian names)
+- Candidate's setup screen selection ALWAYS overrides name detection (handles unisex names)
+- Male → Google UK English Male / Microsoft David
+- Female → Google UK English Female / Microsoft Zira
+- Prefer not to say → neutral English voice
+- Chrome loads voices async — always wait for `onvoiceschanged` before first `speak()`
+
+**Voice call flow:**
+
+```
+Setup screen complete
+→ Recording starts (MediaRecorder)
+→ AI reads opening message aloud
+→ AI reads Question 1 aloud
+→ Mic activates automatically
+→ Candidate speaks answer
+→ 3s silence → AI repeats question + warns "5 seconds before skipping"
+→ 5s more silence → question marked skipped → next question
+→ Answer received → "Thank you" → next question
+→ All questions done → AI reads closing message
+→ Recording auto-uploads to Supabase (recordings bucket)
+→ Completion screen shown
+```
+
+**Silence detection constants:**
+
+- SILENCE_THRESHOLD = 8 (audio level 0–255 below which = silence)
+- SILENCE_REPEAT_MS = 3000 (3s → repeat question + warn)
+- SILENCE_SKIP_MS = 5000 (5s more → skip question)
+- Uses `AudioContext` + `AnalyserNode` to monitor mic volume
+
+**AI scores NEVER shown to candidate:**
+
+- Candidate sees "Answer received!" only
+- Scores + feedback only visible to recruiter on their dashboard
+
+**ASYNC → LIVE takeover detection:**
+
+- Candidate page polls `/api/interview-session/[token]` every 3 seconds
+- Detects `isLive = true` → shows "Your interviewer has joined" banner
+- Detects new `liveMessage` → AI reads it aloud to candidate
+
+### Go Live System (WORKING)
+
+- Recruiter clicks **Go Live — Take Over** on interview detail page
+- `PATCH /api/recruiter/interviews/[id]/go-live` → sets `isLive = true`
+- Candidate page detects within 3 seconds via polling
+- Recruiter live message panel — type or dictate → AI reads it to candidate
+- Recruiter clicks **End Live Session** to return to async mode
+
+### Interview Recording (WORKING)
+
+- `MediaRecorder` starts when candidate clicks "Begin Interview"
+- Records entire session as `audio/webm`
+- Auto-uploads to Supabase Storage `recordings` bucket at end of interview
+- Path: `interviews/{interviewId}/{timestamp}.webm`
+- API: `POST /api/recruiter/interviews/[id]/recording` — authenticated by `x-share-token` header (no session needed)
+- API: `GET /api/recruiter/interviews/[id]/recording` — returns signed URL (1 hour expiry)
+- Recruiter sees audio player + download button on interview detail page
+- ~5MB per 20-minute audio interview
+
+### Interview Messages — Hierarchy (WORKING)
+
+```
+Per-interview message set? → Use it
+No per-interview message? → Use global template (RecruiterInterviewSettings)
+No global template? → Use TomParo default
+```
+
+**TomParo defaults:**
+
+- Opening: "Hi [Name]! Welcome to your interview for [Job] at [Company]. I'm your AI interviewer. Let's begin."
+- Closing: "That's all for today, [Name]. Thank you for your time. The team will be in touch soon. Good luck!"
+
+**Per-interview messages** — set on `/recruiter/interviews/new`:
+
+- Opening message, closing message, mid-interview instructions (all optional)
+
+**Global template** — set in `/recruiter/settings`:
+
+- Same fields — applies to all interviews that don't have per-interview overrides
+- Collapsible indigo section with separate Save button
+
+### Mid-Interview Instructions (WORKING)
+
+Three trigger types stored as JSON array in `customInstructions` / `globalInstructions`:
+
+```json
+[
+  {
+    "trigger": "before_question",
+    "questionIndex": 5,
+    "message": "We are now moving to the technical section."
+  },
+  {
+    "trigger": "question_type",
+    "questionType": "JOB_SPECIFIC",
+    "message": "This next question is about the role."
+  },
+  {
+    "trigger": "timed",
+    "afterMinutes": 10,
+    "message": "You are doing great. We are halfway through."
+  }
+]
+```
+
+- `before_question` — fires before question N
+- `question_type` — fires before every question of a specific type
+- `timed` — fires after X minutes of interview
+
+### Supabase Storage Buckets
+
+| Bucket       | Contents                      | Access                |
+| ------------ | ----------------------------- | --------------------- |
+| `cvs`        | Candidate CVs from apply form | Private — signed URLs |
+| `recordings` | Interview audio recordings    | Private — signed URLs |
+
+- Both use `SUPABASE_SERVICE_KEY` (service_role key, NOT anon key)
+- Signed URLs expire after 1 hour — generate fresh on each request
+- `recordings` bucket must be created separately in Supabase Storage dashboard
+
 ### Company Username (Apply Email) System
 
 - Every recruiter gets a unique `companySlug` (e.g. `thrinxs`)
@@ -536,15 +728,6 @@ Stage 1: Job Creation → Stage 2: CV Screening → Stage 3: Interview Invite �
 - CV file uploaded to Supabase Storage (`cvs` bucket, private)
 - Company jobs page at `/jobs/[companySlug]`
 
-### Supabase Storage (CVs)
-
-- Bucket: `cvs` (private)
-- Path format: `{profileId}/{jobId}/{timestamp}_{filename}`
-- Upload: `lib/supabase-storage.ts → uploadCV()`
-- Preview/Download: signed URL via `getSignedUrl()` — expires 1 hour
-- Env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` (service_role key, NOT anon key)
-- API: `GET /api/recruiter/talent-pool/[id]/cv` → returns signed URL
-
 ### Email System (Resend)
 
 - Emails sent FROM `hire@tomparo.com` (verified domain)
@@ -575,7 +758,7 @@ Stage 1: Job Creation → Stage 2: CV Screening → Stage 3: Interview Invite �
 - AI personalizes each email individually if no custom message provided
 - 200ms delay between sends to avoid Resend rate limiting
 - Each email gets its own tracking pixel
-- UI on candidates page: Bulk Email button → indigo select mode → checkboxes → compose panel → email type + job title + AI write → send
+- UI on candidates page: Bulk Email button → blue select mode → checkboxes → compose panel → email type + job title + AI write → send
 - Results displayed inline: ✅ sent / ❌ failed per candidate
 - Returns summary: { total, successful, failed }
 
@@ -617,21 +800,6 @@ Stage 1: Job Creation → Stage 2: CV Screening → Stage 3: Interview Invite �
   - OWNER/ADMIN: can invite/remove members, change settings, full access
   - MEMBER: can upload CVs, manage jobs, send emails, view analytics — cannot manage team or billing
 
-### Phase 5 — AI Interviews (🚧 IN PROGRESS — Business+)
-
-- **interview-engine.ts** is started — question array parsing bug fixed, question generation logic underway
-- **Interview modes:**
-  - **ASYNC** — AI generates 8–10 questions, sends candidate a unique private link. Candidate answers on their own time. AI scores each answer (0–10 + feedback) instantly on submission. Recruiter reviews the completed scored report at any time.
-  - **LIVE** — Recruiter conducts interview in real time. AI surfaces questions on screen, scores answers instantly as recruiter submits them, generates final summary + hire recommendation at the end.
-- **Launching an interview:** From the candidates page, click the **⚡ Interview** button on any card → **InterviewModeModal** appears → recruiter selects ASYNC or LIVE → navigates to `/recruiter/interviews/new?candidateId=xxx&mode=xxx`
-- **Bulk interviews:** Use **Bulk Interview** button in header → select candidates → choose ASYNC or LIVE → navigates to `/recruiter/interviews/bulk?ids=xxx,xxx&mode=xxx`
-- Question generation based on 4 sources:
-  1. CV verification — questions that verify CV content
-  2. Location-based — questions relevant to candidate's city/country (from CV aiAnalysis.candidateLocation)
-  3. Job description — questions based on job requirements and responsibilities
-  4. Behavioural / culture fit
-- Interview statuses: PENDING → IN_PROGRESS → COMPLETED / CANCELLED
-
 ### Yearly Pricing Toggle
 
 - Recruiter pricing page has Monthly / Yearly toggle
@@ -659,6 +827,12 @@ Stage 1: Job Creation → Stage 2: CV Screening → Stage 3: Interview Invite �
 - Company Profile (name, size, industry, website, description)
 - Company Username — live availability check, confirm button (saves independently)
 - Email Reply Settings — reply-to email for candidate replies + CC copies
+- **Global Interview Message Template** — collapsible indigo section, separate Save button:
+  - Global opening message (leave blank for TomParo default)
+  - Global closing message (leave blank for TomParo default)
+  - Global mid-interview instructions (JSON array, 3 trigger types)
+  - Shows how each interview type delivers messages (Text = display, Voice/Video = read aloud)
+  - Placeholders: [Name] [Job] [Company]
 - Team Management — invite by email, role select, seat count display, pending invites, remove members
 - Save Settings button — turns green + "Settings Saved!" for 3 seconds on success
 
@@ -889,46 +1063,29 @@ CV upload + AI analysis, Job matching, Cover letter (DOCX), Application email (3
 - ✅ Candidate status update bug — PATCH on `/api/recruiter/candidates/[id]` fixed
 - ✅ AI interview question array parsing — interview-engine.ts fixed to handle array vs string inconsistency from AI providers
 
-**Recruiter Platform — Phase 5 🚧 IN PROGRESS:**
+**Recruiter Platform — Phase 5 ✅ COMPLETE:**
 
-- ✅ interview-engine.ts — started, question array parsing fixed
-- ✅ Candidates page — Interview button per card (indigo, ⚡ icon)
-- ✅ InterviewModeModal — ASYNC vs LIVE choice with clear explanations, navigates to /recruiter/interviews/new
-- ✅ Bulk Interview panel — separate from bulk email, indigo themed, ASYNC/LIVE mode picker, select all in tab + select all by category
-- ✅ selectMode refactored from boolean to `"email" | "interview" | null` — modes cannot overlap
-- ⬜ Schema: RecruiterInterview + RecruiterInterviewQuestion + enums (not yet pushed)
-- ⬜ API routes: POST/GET /api/recruiter/interviews, answer, complete
-- ⬜ /recruiter/interviews page (list)
-- ⬜ /recruiter/interviews/new page (create — receives candidateId + mode)
-- ⬜ /recruiter/interviews/bulk page (bulk create — receives ids + mode)
-- ⬜ /recruiter/interviews/[id] page (conduct/view)
+- ✅ `interview-engine.ts` — WORKING: generateInterviewQuestions (4 sources: CV verification + location + job + behavioural), scoreInterviewAnswer (0-10 + feedback), generateInterviewSummary (final recommendation + strengths + concerns)
+- ✅ Schema — RecruiterInterview + RecruiterInterviewQuestion + RecruiterInterviewSettings + all enums (InterviewType, MessageType, QuestionType, InterviewStatus, InterviewMode) — all pushed to DB
+- ✅ API — POST/GET /api/recruiter/interviews (accepts interviewType + per-interview messages)
+- ✅ API — POST /api/recruiter/interviews/[id]/answer (handles skipped flag)
+- ✅ API — POST /api/recruiter/interviews/[id]/complete (generates final summary)
+- ✅ API — PATCH /api/recruiter/interviews/[id]/go-live (isLive + liveMessage)
+- ✅ API — POST/GET /api/recruiter/interviews/[id]/recording (upload + signed URL)
+- ✅ API — GET/PATCH /api/recruiter/interview-settings (global template)
+- ✅ API — GET /api/interview-session/[token] (returns interviewType, CV data, messages, isLive, liveMessage — PUBLIC)
+- ✅ Candidates page — Interview button (indigo ⚡), InterviewModeModal, Bulk Interview panel (indigo), select all in tab, select all by category, selectMode refactored to `"email" | "interview" | null`
+- ✅ `/recruiter/interviews` — list page (WORKING)
+- ✅ `/recruiter/interviews/new` — Text/Voice/Video type picker + ASYNC/LIVE mode + job context + per-interview messages (opening, closing, mid-interview instructions with 3 trigger types)
+- ✅ `/recruiter/interviews/bulk` — same pickers + bulk create with live progress bar + per-candidate results
+- ✅ `/recruiter/interviews/[id]` — Go Live button, live message panel (type or dictate), End Live Session, recording player + download button, skipped question display, interview type badge, AI scores visible to recruiter only
+- ✅ `/interview/[token]` — Setup screen (gender detection from name list + override, DOB), Voice Call mode (AI reads questions with gender-matched voice, silence detection 3s repeat/5s skip, confirm or re-record answer, full session MediaRecorder, polls for live takeover every 3s), Text mode (clean textarea, completion screen), AI scores NEVER shown to candidate
+- ✅ `/recruiter/settings` — Global interview message template section (indigo themed, collapsible, opening + closing + mid-interview instructions with 3 trigger types, separate save button, fetches existing settings on load)
+- ✅ Recording — MediaRecorder → auto-upload to Supabase `recordings` bucket → signed URL audio player + download on recruiter dashboard
 
 ---
 
 ## ⏳ Remaining Phases
-
-### Phase 5: AI Interviews (Business+) — 🚧 IN PROGRESS
-
-- [x] interview-engine.ts — question array parsing fixed, generation underway
-- [x] Candidates page — Interview button + InterviewModeModal + Bulk Interview panel
-- [ ] Schema: RecruiterInterview + RecruiterInterviewQuestion + InterviewStatus + InterviewMode enums
-- [ ] lib/ai/interview-engine.ts — complete: generate questions (CV verification + location + job + behavioural), score answers (0-10 + feedback), generate final summary + hire recommendation
-- [ ] POST /api/recruiter/interviews — create interview + AI generates questions
-- [ ] GET /api/recruiter/interviews — list all interviews
-- [ ] GET /api/recruiter/interviews/[id] — get interview + all questions
-- [ ] POST /api/recruiter/interviews/[id]/answer — submit one answer → AI scores instantly
-- [ ] POST /api/recruiter/interviews/[id]/complete — AI generates final summary + recommendation
-- [ ] DELETE /api/recruiter/interviews/[id]
-- [ ] /recruiter/interviews page — all interviews list with status + scores
-- [ ] /recruiter/interviews/new page — create interview (candidateId + mode pre-filled from query params)
-- [ ] /recruiter/interviews/bulk page — bulk interview creation (ids + mode from query params)
-- [ ] /recruiter/interviews/[id] page — conduct/view interview (both ASYNC + LIVE modes)
-- [ ] Interview scheduler — pick date/time, generate meeting link, send to candidate, candidate confirms
-- [ ] Calendar integration — Google Calendar + Outlook
-- [ ] Candidate timeline view — Applied → Reviewed → Interviewed → Offer → Hired
-- [ ] AI notes summary — multiple interviewers leave notes → AI summarizes into one recommendation
-- [ ] Voice interviews (after text is complete)
-- [ ] Video interviews (after voice is complete)
 
 ### Phase 6: AI Autopilot + Documents (Enterprise+)
 
@@ -982,71 +1139,61 @@ CV upload + AI analysis, Job matching, Cover letter (DOCX), Application email (3
 - [ ] WhatsApp notifications (Termii)
 - [ ] Blog with career tips (SEO)
 - [ ] Google Calendar + Outlook integration
+- [ ] Video interview candidate page UI (recording infra already built, UI pending)
 
 ---
 
 ## Migration History
 
-### Phase 5 Start — AI Interviews UI + Bug Fixes (2026-07-11)
+### Phase 5 Complete — Full AI Interview System (2026-07-11)
+
+- Added `InterviewType` enum (TEXT/VOICE/VIDEO), `MessageType` enum (TEXT/AUDIO/VIDEO), `QuestionType` enum
+- Added to `RecruiterInterview`: interviewType, isLive, liveStartedAt, liveMessage, openingMessage, openingMessageType, openingMessageUrl, closingMessage, closingMessageType, closingMessageUrl, customInstructions, recordingUrl, recordingUploadedAt
+- Added `skipped` field to `RecruiterInterviewQuestion`
+- Added `RecruiterInterviewSettings` model for global interview message templates
+- Built `GET/PATCH /api/recruiter/interview-settings` — global template CRUD
+- Built `PATCH /api/recruiter/interviews/[id]/go-live` — recruiter takeover + live message
+- Built `POST/GET /api/recruiter/interviews/[id]/recording` — upload to Supabase + signed URL
+- Updated `api/interview-session/[token]` — returns interviewType, CV data (from candidate or application aiAnalysis), messages (per-interview overrides global), isLive, liveMessage
+- Updated answer route — handles `skipped` flag, skipped questions get null score
+- Full rewrite of `app/interview/[token]/page.tsx`:
+  - Setup screen (gender auto-detected from 200+ name list inc. Nigerian names, always overridable, DOB, consent)
+  - Voice Call mode: SpeechSynthesis reads questions with gender-matched voice (pitch adjusted), SpeechRecognition captures answers
+  - Silence detection: AudioContext + AnalyserNode, 3s → repeat + warn, 5s more → skip
+  - Full session MediaRecorder (audio/webm) → auto-upload to Supabase `recordings` bucket on completion
+  - Live takeover: polls every 3s, detects isLive, shows banner, reads liveMessage aloud
+  - Text mode: unchanged clean textarea UI with completion screen
+  - AI scores NEVER shown to candidate
+- Updated recruiter interview detail page: Go Live button (toggle), live message panel (type or dictate), End Live Session, recording player + download, skipped question display, interview type badge (Text=indigo, Voice=violet, Video=pink)
+- Updated `new/page.tsx`: Text/Voice/Video type picker, ASYNC/LIVE mode, per-interview messages (opening + closing + mid-interview instructions with before_question/question_type/timed triggers), fetches global settings to show hints
+- Updated `bulk/page.tsx`: same type + mode pickers
+- Updated `settings/page.tsx`: global interview template section (indigo, collapsible, separate save, loads existing on mount)
+- Updated candidates page: Interview button (indigo ⚡), InterviewModeModal (ASYNC/LIVE), Bulk Interview panel, select all in tab, select all by category
+
+### Phase 5 Start — UI + Bug Fixes (2026-07-11)
 
 - Fixed mobile sidebar toggle — sidebarOpen state moved to layout.tsx for both dashboard + recruiter layouts
 - RecruiterSidebar fully restructured — now mobile-aware, accepts isOpen prop
 - Fixed candidate status PATCH bug in /api/recruiter/candidates/[id]/route.ts
 - Started lib/ai/interview-engine.ts — fixed AI question array parsing bug
-- Updated candidates/page.tsx:
-  - Added ⚡ Interview button to every candidate card (indigo color)
-  - Added InterviewModeModal — ASYNC vs LIVE selection with explanations + navigation
-  - Added Bulk Interview panel (indigo themed) — separate from Bulk Email
-  - Refactored selectMode from boolean → `"email" | "interview" | null`
-  - Added Select All in Tab — selects all candidates with email in current status tab
-  - Added Select All by Category — All New / All Reviewed / All Shortlisted buttons
-  - Candidate cards highlight indigo in interview mode, blue in email mode
+- Added ⚡ Interview button + InterviewModeModal + Bulk Interview panel to candidates page
+- Refactored selectMode from boolean → `"email" | "interview" | null`
+- Added Select All in Tab + Select All by Category buttons
 
 ### Phase 4 — Analytics, Team Seats, Activity Log
 
 - Added RecruiterActivityLog, RecruiterTeamMember, RecruiterInvite models to schema
 - Added ActivityType, TeamRole, InviteStatus enums
-- Added relations to RecruiterProfile + User
-- Built analytics dashboard (/recruiter/analytics) — Business+ plan-gated with lock screen for lower plans
-- Built activity log API (/api/recruiter/activity)
-- Built team API: GET/POST /api/recruiter/team, PATCH/DELETE /api/recruiter/team/[id]
-- Built public invite lookup: GET /api/recruiter/team/invite?token=xxx (no auth)
-- Built invite accept API: POST /api/recruiter/team/invite/accept
-- Built invite accept page (/recruiter/invite/accept) — added as PUBLIC route in proxy.ts
-- Updated signup page — detects inviteToken, shows invite context banner, locks email + company name
-- Added team management section to /recruiter/settings (invite form, members list, pending invites, seat counter)
-- Added lib/activity-log.ts helper — silently fails, never breaks main flow
-- Wired activity logging into: CV upload, bulk upload, job create, email sent, bulk email, candidate status change
+- Built analytics dashboard, activity log, team API, invite flow, accept page
 
-### Phase 3 Communication + Email Tracking + Bulk Email
+### Phase 3 — Communication + Email Tracking + Bulk Email
 
-- Added Resend email service (lib/email.ts) with tracking pixel support
-- Added Supabase Storage for CV files (lib/supabase-storage.ts)
-- Added RecruiterEmail table (with openedAt, openCount fields)
-- Added RecruiterApplication table for TalentPool
-- Added companySlug + slugLocked to RecruiterProfile
-- Added jobSlug to JobPosting
-- Added cvFileUrl to RecruiterApplication
-- Built TalentPool page with CV preview/download
-- Built public apply form with AI match score preview
-- Built company jobs listing page
-- Built email open tracking: 1×1 pixel at /api/track/email-open/[emailId]
-- Built bulk email sending: /api/recruiter/emails/bulk (Business+ plan-gated)
-- Updated candidates page with bulk email select UI + compose panel
-- Updated candidate detail page with open tracking display in email history
-- Added /api/track/\* as public route in proxy.ts
-- Added CookieBanner component + Toaster to root layout
-- Added password visibility toggle + keep me signed in to auth pages
-- Added yearly pricing toggle (15% discount) to recruiter pricing page
+- Added Resend, Supabase CV Storage, RecruiterEmail, RecruiterApplication, TalentPool, public apply form, email open tracking, bulk email
 
-### Recruiter Platform Added (Phase 1 + Phase 2)
+### Phase 1 + Phase 2 — Recruiter Platform Core
 
 - Added RecruiterProfile, JobPosting, RecruiterCandidate tables + enums
 - Added (recruiter) route group with purple-themed layout
-- auth.ts updated to always query DB for isRecruiter flag
-- signup/signin pages updated with toggle
-- proxy.ts updated with recruiter route protection
-- adm-zip added for bulk ZIP processing
 - Pipeline Kanban built with @dnd-kit
 
 ### From SQLite to PostgreSQL (Supabase)
@@ -1091,6 +1238,9 @@ Long-term vision: The **AI Career Passport** becomes every professional's living
 - **companySlug:** Auto-generated on recruiter signup — recruiter can change until locked
 - **Supabase Storage:** Use service_role key NOT anon key — anon key can't upload to private buckets
 - **CV signed URLs:** Expire after 1 hour — generate fresh on each view/download request
+- **Recording signed URLs:** Expire after 1 hour — generate fresh on each view/download request
+- **Recordings bucket:** Must be named `recordings` in Supabase Storage — separate from `cvs` bucket
+- **Recording auth:** Uses `x-share-token` header (candidate page sends it, no session required for upload)
 - **Resend:** Sends FROM hire@tomparo.com — Reply-To set to recruiter's personal email
 - **TalentPool vs Candidates:** TalentPool = incoming applications; Candidates = uploaded CVs
 - **adm-zip import:** `const AdmZip = (await import("adm-zip")).default`
@@ -1108,6 +1258,7 @@ Long-term vision: The **AI Career Passport** becomes every professional's living
 - **Yearly pricing:** yearlyPrice helper defined OUTSIDE component — billing state INSIDE component
 - **Footer hides on /recruiter/ (trailing slash):** NOT on /recruiter-pricing
 - **Jobs pages are public:** /jobs/\* must return NextResponse.next() in proxy.ts before dashboard check
+- **interview/\* pages are public:** /interview/\* must be in proxy.ts public exceptions
 - **Duplicate applications:** Check by recruiterId + jobId + candidateEmail before creating
 - **toSafeString helper:** Convert AI field output — AI may return array instead of string
 - **Email open tracking:** 1×1 pixel at /api/track/email-open/[emailId] — public route, no auth
@@ -1126,8 +1277,26 @@ Long-term vision: The **AI Career Passport** becomes every professional's living
 - **Mobile sidebar state:** sidebarOpen lives in layout.tsx — passed as isOpen to Sidebar, as onToggle to Topbar. Never put this state inside the Sidebar or Topbar components.
 - **selectMode on candidates page:** Is `"email" | "interview" | null` — NOT a boolean. Check `selectMode === "email"` or `selectMode === "interview"`. Both modes share selectedIds but cannot be active simultaneously.
 - **Interview button color:** Indigo — distinct from Email (blue) and View (purple)
+- **Interview type badge:** Text=indigo, Voice=violet, Video=pink
 - **InterviewModeModal:** Opened by clicking Interview button on a candidate card. ASYNC = recommended, sends link. LIVE = recruiter present. On confirm → navigates to /recruiter/interviews/new?candidateId=xxx&mode=xxx&name=xxx
 - **Bulk Interview route:** /recruiter/interviews/bulk?ids=xxx,xxx&mode=ASYNC|LIVE
 - **Interview questions based on:** CV content verification + candidate location (CV aiAnalysis.candidateLocation) + job description + behavioural
-- **Interview modes:** ASYNC (candidate answers alone via private link) + LIVE (recruiter conducts in real time)
-- **interview-engine.ts:** AI may return questions as array of strings or array of objects — always normalise before storing
+- **Interview modes:** ASYNC (candidate answers alone via private link, recruiter can go live anytime) + LIVE (recruiter conducts in real time)
+- **Interview type TEXT:** Candidate types in textarea — any browser, any device
+- **Interview type VOICE:** AI reads questions aloud (SpeechSynthesis), candidate speaks (SpeechRecognition), MediaRecorder captures audio
+- **Voice interviews — localhost:** SpeechRecognition may silently fail on HTTP. Always test voice on tomparo.com (HTTPS)
+- **Voice gender detection:** Detects from first name using 200+ name list (inc. Nigerian names). Setup screen selection ALWAYS overrides — handles unisex names
+- **Voice pitch:** Male = 0.85, Female = 1.1, Prefer not to say = 1.0
+- **Silence thresholds:** SILENCE_THRESHOLD=8, SILENCE_REPEAT_MS=3000, SILENCE_SKIP_MS=5000
+- **SpeechSynthesis voices:** Load async in Chrome — always wait for `onvoiceschanged` before calling speak()
+- **Go Live:** Recruiter PATCH sets isLive=true → candidate polls every 3s → detects change → banner shown + AI announces
+- **liveMessage:** Recruiter types or dictates → saved to DB → candidate page polls → reads aloud via SpeechSynthesis
+- **Interview message hierarchy:** per-interview → global template (RecruiterInterviewSettings) → TomParo default
+- **Message placeholders:** [Name] [Job] [Company] — replace before speaking/displaying
+- **customInstructions / globalInstructions:** JSON array, triggers: before_question / question_type / timed
+- **Skipped questions:** skipped=true, answer="[No response — question skipped]", aiScore=null, aiFeedback=null
+- **AI scores:** NEVER shown to candidate — recruiter dashboard only
+- **MediaRecorder format:** audio/webm — stored as .webm in Supabase recordings bucket
+- **Recording size:** ~5MB per 20-minute audio interview
+- **interview-engine.ts:** Uses extractArray() helper — AI may return questions as array of strings or array of objects — always normalise before storing
+- **interview-session API:** Returns CV data from candidate.aiAnalysis OR application.aiAnalysis — checks both
