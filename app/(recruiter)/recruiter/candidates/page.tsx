@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useCallback, Suspense } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useSearchParams } from "next/navigation";
 import {
   Users, Search, Upload, ArrowRight,
   CheckCircle, XCircle, AlertTriangle, Clock, Star, Trophy,
   Mail, Send, Loader2, X, ChevronDown, Wand2,
+  Video, MessageSquare, Mic, Zap,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -33,7 +35,153 @@ const emailTypes = [
   { value: "waitlist", label: "Waitlist", icon: "⏳" },
 ];
 
+// ── Interview Mode Modal ──────────────────────────────────────────────────────
+function InterviewModeModal({
+  candidate,
+  onClose,
+  onConfirm,
+}: {
+  candidate: any;
+  onClose: () => void;
+  onConfirm: (mode: "ASYNC" | "LIVE") => void;
+}) {
+  const [selected, setSelected] = useState<"ASYNC" | "LIVE" | null>(null);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+
+      {/* Modal */}
+      <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl">
+        {/* Close */}
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition"
+        >
+          <X className="w-4 h-4" />
+        </button>
+
+        {/* Header */}
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-1">
+            <Zap className="w-5 h-5 text-indigo-400" />
+            <h2 className="text-lg font-bold text-white">Start AI Interview</h2>
+          </div>
+          <p className="text-sm text-slate-400">
+            Interviewing{" "}
+            <span className="text-white font-semibold">
+              {candidate.candidateName || "this candidate"}
+            </span>
+          </p>
+        </div>
+
+        {/* Mode options */}
+        <div className="space-y-3 mb-6">
+
+          {/* ASYNC */}
+          <button
+            onClick={() => setSelected("ASYNC")}
+            className={`w-full text-left rounded-xl border p-4 transition ${
+              selected === "ASYNC"
+                ? "border-indigo-500 bg-indigo-500/10"
+                : "border-white/10 bg-white/[0.02] hover:border-white/20"
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                selected === "ASYNC" ? "bg-indigo-500/20" : "bg-white/5"
+              }`}>
+                <MessageSquare className={`w-4 h-4 ${selected === "ASYNC" ? "text-indigo-400" : "text-slate-500"}`} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <p className={`text-sm font-semibold ${selected === "ASYNC" ? "text-white" : "text-slate-300"}`}>
+                    Async Interview
+                  </p>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-400 uppercase tracking-wide">
+                    Recommended
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  AI generates questions and sends the candidate a private link.
+                  They answer on their own time — you review the scored report when ready.
+                </p>
+                <div className="flex gap-3 mt-2">
+                  <span className="text-[10px] text-slate-500">⏱ No scheduling needed</span>
+                  <span className="text-[10px] text-slate-500">🔗 Shareable link</span>
+                  <span className="text-[10px] text-slate-500">📊 AI scores every answer</span>
+                </div>
+              </div>
+              {selected === "ASYNC" && (
+                <CheckCircle className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+              )}
+            </div>
+          </button>
+
+          {/* LIVE */}
+          <button
+            onClick={() => setSelected("LIVE")}
+            className={`w-full text-left rounded-xl border p-4 transition ${
+              selected === "LIVE"
+                ? "border-violet-500 bg-violet-500/10"
+                : "border-white/10 bg-white/[0.02] hover:border-white/20"
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                selected === "LIVE" ? "bg-violet-500/20" : "bg-white/5"
+              }`}>
+                <Video className={`w-4 h-4 ${selected === "LIVE" ? "text-violet-400" : "text-slate-500"}`} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-semibold mb-1 ${selected === "LIVE" ? "text-white" : "text-slate-300"}`}>
+                  Live Interview
+                </p>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  You conduct the interview in real time. AI surfaces questions,
+                  scores answers instantly, and generates a summary when you finish.
+                </p>
+                <div className="flex gap-3 mt-2">
+                  <span className="text-[10px] text-slate-500">🎙 Real-time scoring</span>
+                  <span className="text-[10px] text-slate-500">📅 Schedule first</span>
+                  <span className="text-[10px] text-slate-500">📝 AI summary</span>
+                </div>
+              </div>
+              {selected === "LIVE" && (
+                <CheckCircle className="w-4 h-4 text-violet-400 shrink-0 mt-0.5" />
+              )}
+            </div>
+          </button>
+        </div>
+
+        {/* Confirm */}
+        <button
+          onClick={() => selected && onConfirm(selected)}
+          disabled={!selected}
+          className={`w-full py-3 rounded-xl text-sm font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed ${
+            selected === "LIVE"
+              ? "bg-violet-600 hover:bg-violet-500 text-white"
+              : "bg-indigo-600 hover:bg-indigo-500 text-white"
+          }`}
+        >
+          {selected === "ASYNC"
+            ? "Generate Questions & Send Link →"
+            : selected === "LIVE"
+            ? "Set Up Live Interview →"
+            : "Choose an interview type"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
 function CandidatesInner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const jobFilter = searchParams.get("job") || "";
 
@@ -45,9 +193,11 @@ function CandidatesInner() {
   const [jobId, setJobId] = useState(jobFilter);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  // ── Bulk email state ──
+  // ── Select mode: 'email' | 'interview' | null ──
+  const [selectMode, setSelectMode] = useState<"email" | "interview" | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [selectMode, setSelectMode] = useState(false);
+
+  // ── Bulk email state ──
   const [bulkEmailType, setBulkEmailType] = useState("interview_invite");
   const [bulkJobTitle, setBulkJobTitle] = useState("");
   const [bulkMessage, setBulkMessage] = useState("");
@@ -55,6 +205,16 @@ function CandidatesInner() {
   const [bulkSending, setBulkSending] = useState(false);
   const [bulkResults, setBulkResults] = useState<any[] | null>(null);
   const [showBulkPanel, setShowBulkPanel] = useState(false);
+
+  // ── Bulk interview state ──
+  const [bulkInterviewMode, setBulkInterviewMode] = useState<"ASYNC" | "LIVE" | null>(null);
+  const [bulkInterviewSending, setBulkInterviewSending] = useState(false);
+
+  // ── Single interview modal ──
+  const [interviewModal, setInterviewModal] = useState<{ open: boolean; candidate: any | null }>({
+    open: false,
+    candidate: null,
+  });
 
   const fetchCandidates = useCallback(async () => {
     try {
@@ -83,6 +243,11 @@ function CandidatesInner() {
   useEffect(() => { fetchJobs(); }, []);
   useEffect(() => { fetchCandidates(); }, [fetchCandidates]);
 
+  // ── Filtered candidates (what's visible in current tab) ──
+  const visibleCandidates = candidates.filter((c) =>
+    statusFilter === "ALL" ? true : c.status === statusFilter
+  );
+
   const updateStatus = async (candidateId: string, status: string) => {
     setUpdatingId(candidateId);
     try {
@@ -101,6 +266,7 @@ function CandidatesInner() {
     }
   };
 
+  // ── Selection helpers ──
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -110,30 +276,55 @@ function CandidatesInner() {
     });
   };
 
-  const selectAll = () => {
-    const withEmail = candidates
+  // Select all in current visible tab that have email
+  const selectAllInTab = () => {
+    const eligible = visibleCandidates
       .filter((c) => c.candidateEmail)
       .map((c) => c.id);
-    setSelectedIds(new Set(withEmail));
+    setSelectedIds(new Set(eligible));
+  };
+
+  // Select all by a specific status (regardless of current tab)
+  const selectAllByStatus = (status: string) => {
+    const eligible = candidates
+      .filter((c) => (status === "ALL" || c.status === status) && c.candidateEmail)
+      .map((c) => c.id);
+    setSelectedIds(new Set(eligible));
   };
 
   const deselectAll = () => setSelectedIds(new Set());
 
+  const exitSelectMode = () => {
+    setSelectMode(null);
+    setSelectedIds(new Set());
+    setShowBulkPanel(false);
+    setBulkResults(null);
+    setBulkInterviewMode(null);
+  };
+
+  // ── Single interview click ──
+  const handleInterviewClick = (candidate: any) => {
+    setInterviewModal({ open: true, candidate });
+  };
+
+  const handleInterviewConfirm = (mode: "ASYNC" | "LIVE") => {
+    const candidate = interviewModal.candidate;
+    setInterviewModal({ open: false, candidate: null });
+    // Navigate to interview creation with candidate + mode pre-filled
+    router.push(
+      `/recruiter/interviews/new?candidateId=${candidate.id}&mode=${mode}&name=${encodeURIComponent(candidate.candidateName || "")}`
+    );
+  };
+
+  // ── Bulk email handlers ──
   const handleGenerateBulkMessage = async () => {
-    if (!bulkJobTitle.trim()) {
-      toast.error("Enter a job title first");
-      return;
-    }
+    if (!bulkJobTitle.trim()) { toast.error("Enter a job title first"); return; }
     setBulkGenerating(true);
     try {
       const res = await fetch("/api/recruiter/emails/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: bulkEmailType,
-          candidateName: "the candidate",
-          jobTitle: bulkJobTitle,
-        }),
+        body: JSON.stringify({ type: bulkEmailType, candidateName: "the candidate", jobTitle: bulkJobTitle }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -147,14 +338,9 @@ function CandidatesInner() {
   };
 
   const handleBulkSend = async () => {
-    if (selectedIds.size === 0) {
-      toast.error("Select at least one candidate");
-      return;
-    }
-
+    if (selectedIds.size === 0) { toast.error("Select at least one candidate"); return; }
     setBulkSending(true);
     setBulkResults(null);
-
     try {
       const res = await fetch("/api/recruiter/emails/bulk", {
         method: "POST",
@@ -166,25 +352,36 @@ function CandidatesInner() {
           customMessage: bulkMessage || undefined,
         }),
       });
-
       const data = await res.json();
-
       if (!res.ok) {
-        if (data.upgradeRequired) {
-          toast.error("Bulk email requires Business plan or higher");
-          return;
-        }
+        if (data.upgradeRequired) { toast.error("Bulk email requires Business plan or higher"); return; }
         throw new Error(data.error);
       }
-
       setBulkResults(data.results);
       toast.success(`${data.summary.successful} of ${data.summary.total} emails sent!`);
       setSelectedIds(new Set());
-      setSelectMode(false);
+      setSelectMode(null);
     } catch (err: any) {
       toast.error(err.message || "Failed to send bulk emails");
     } finally {
       setBulkSending(false);
+    }
+  };
+
+  // ── Bulk interview handler ──
+  const handleBulkInterview = async () => {
+    if (!bulkInterviewMode) { toast.error("Choose ASYNC or LIVE first"); return; }
+    if (selectedIds.size === 0) { toast.error("Select at least one candidate"); return; }
+    setBulkInterviewSending(true);
+    try {
+      // Navigate to bulk interview creation — Phase 5 route
+      router.push(
+        `/recruiter/interviews/bulk?ids=${Array.from(selectedIds).join(",")}&mode=${bulkInterviewMode}`
+      );
+    } catch {
+      toast.error("Failed to start interviews");
+    } finally {
+      setBulkInterviewSending(false);
     }
   };
 
@@ -200,10 +397,19 @@ function CandidatesInner() {
   const getAtsColor = (score: number) =>
     score >= 80 ? "text-emerald-400" : score >= 60 ? "text-amber-400" : "text-red-400";
 
-  const candidatesWithEmail = candidates.filter((c) => c.candidateEmail).length;
+  const eligibleInTab = visibleCandidates.filter((c) => c.candidateEmail).length;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
+
+      {/* Interview mode modal */}
+      {interviewModal.open && interviewModal.candidate && (
+        <InterviewModeModal
+          candidate={interviewModal.candidate}
+          onClose={() => setInterviewModal({ open: false, candidate: null })}
+          onConfirm={handleInterviewConfirm}
+        />
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -214,24 +420,39 @@ function CandidatesInner() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {/* Bulk email toggle */}
+
+          {/* Bulk Interview toggle */}
           <button
             onClick={() => {
-              setSelectMode(!selectMode);
-              if (selectMode) {
-                setSelectedIds(new Set());
-                setShowBulkPanel(false);
-              }
+              if (selectMode === "interview") { exitSelectMode(); }
+              else { setSelectMode("interview"); setShowBulkPanel(false); }
             }}
             className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-              selectMode
+              selectMode === "interview"
+                ? "bg-indigo-600 text-white hover:bg-indigo-500"
+                : "border border-white/10 bg-white/5 text-slate-400 hover:text-white hover:bg-white/10"
+            }`}
+          >
+            <Zap className="w-4 h-4" />
+            {selectMode === "interview" ? `${selectedIds.size} selected` : "Bulk Interview"}
+          </button>
+
+          {/* Bulk Email toggle */}
+          <button
+            onClick={() => {
+              if (selectMode === "email") { exitSelectMode(); }
+              else { setSelectMode("email"); setShowBulkPanel(false); }
+            }}
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+              selectMode === "email"
                 ? "bg-blue-600 text-white hover:bg-blue-500"
                 : "border border-white/10 bg-white/5 text-slate-400 hover:text-white hover:bg-white/10"
             }`}
           >
             <Mail className="w-4 h-4" />
-            {selectMode ? `${selectedIds.size} selected` : "Bulk Email"}
+            {selectMode === "email" ? `${selectedIds.size} selected` : "Bulk Email"}
           </button>
+
           <Link
             href="/recruiter/upload"
             className="inline-flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-purple-500 transition"
@@ -242,25 +463,42 @@ function CandidatesInner() {
         </div>
       </div>
 
-      {/* Bulk email panel */}
-      {selectMode && (
+      {/* ── Bulk Email Panel ── */}
+      {selectMode === "email" && (
         <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-6 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
               <p className="text-sm font-semibold text-white">
                 Bulk Email — {selectedIds.size} candidate{selectedIds.size !== 1 ? "s" : ""} selected
               </p>
               <p className="text-xs text-slate-400 mt-0.5">
-                {candidatesWithEmail} candidates have email addresses
+                {eligibleInTab} candidates with email in current view
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              {/* Select all in current tab */}
               <button
-                onClick={selectAll}
+                onClick={selectAllInTab}
                 className="px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium hover:bg-blue-500/20 transition"
               >
-                Select All ({candidatesWithEmail})
+                Select All in Tab ({eligibleInTab})
               </button>
+              {/* Quick select by category */}
+              <div className="flex gap-1">
+                {(["NEW", "REVIEWED", "SHORTLISTED"] as const).map((s) => {
+                  const n = candidates.filter((c) => c.status === s && c.candidateEmail).length;
+                  if (!n) return null;
+                  return (
+                    <button
+                      key={s}
+                      onClick={() => selectAllByStatus(s)}
+                      className="px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-400 text-xs font-medium hover:bg-white/10 transition"
+                    >
+                      All {statusConfig[s].label} ({n})
+                    </button>
+                  );
+                })}
+              </div>
               <button
                 onClick={deselectAll}
                 className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-400 text-xs font-medium hover:bg-white/10 transition"
@@ -281,12 +519,8 @@ function CandidatesInner() {
           {/* Compose panel */}
           {showBulkPanel && selectedIds.size > 0 && (
             <div className="space-y-4 pt-4 border-t border-white/5">
-
-              {/* Email type */}
               <div>
-                <p className="text-xs font-semibold text-white uppercase tracking-wider mb-3">
-                  Email Type
-                </p>
+                <p className="text-xs font-semibold text-white uppercase tracking-wider mb-3">Email Type</p>
                 <div className="flex flex-wrap gap-2">
                   {emailTypes.map((t) => (
                     <button
@@ -298,14 +532,11 @@ function CandidatesInner() {
                           : "border-white/10 bg-white/[0.02] text-slate-400 hover:border-white/20"
                       }`}
                     >
-                      <span>{t.icon}</span>
-                      {t.label}
+                      <span>{t.icon}</span>{t.label}
                     </button>
                   ))}
                 </div>
               </div>
-
-              {/* Job title */}
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-2">
                   Job Title <span className="text-slate-600">(used to personalize each email)</span>
@@ -318,8 +549,6 @@ function CandidatesInner() {
                   className="w-full rounded-xl border border-white/10 bg-slate-900/50 px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-blue-500/50 transition"
                 />
               </div>
-
-              {/* Message */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-xs font-medium text-slate-400">
@@ -330,11 +559,7 @@ function CandidatesInner() {
                     disabled={bulkGenerating || !bulkJobTitle.trim()}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xs font-semibold hover:opacity-90 transition disabled:opacity-50"
                   >
-                    {bulkGenerating ? (
-                      <><Loader2 className="w-3 h-3 animate-spin" />Generating...</>
-                    ) : (
-                      <><Wand2 className="w-3 h-3" />Write with AI</>
-                    )}
+                    {bulkGenerating ? <><Loader2 className="w-3 h-3 animate-spin" />Generating...</> : <><Wand2 className="w-3 h-3" />Write with AI</>}
                   </button>
                 </div>
                 <textarea
@@ -345,13 +570,9 @@ function CandidatesInner() {
                   className="w-full rounded-xl border border-white/10 bg-slate-900/50 px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-blue-500/50 resize-none transition"
                 />
               </div>
-
-              {/* Send button */}
               <div className="flex items-center justify-between gap-4">
                 <p className="text-xs text-slate-500">
-                  Will send to{" "}
-                  <span className="text-white font-semibold">{selectedIds.size}</span>{" "}
-                  candidate{selectedIds.size !== 1 ? "s" : ""}
+                  Will send to <span className="text-white font-semibold">{selectedIds.size}</span> candidate{selectedIds.size !== 1 ? "s" : ""}
                   {!bulkMessage && " · AI will personalize each email"}
                 </p>
                 <button
@@ -359,11 +580,7 @@ function CandidatesInner() {
                   disabled={bulkSending || selectedIds.size === 0}
                   className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-500 transition disabled:opacity-50"
                 >
-                  {bulkSending ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" />Sending...</>
-                  ) : (
-                    <><Send className="w-4 h-4" />Send to {selectedIds.size} Candidates</>
-                  )}
+                  {bulkSending ? <><Loader2 className="w-4 h-4 animate-spin" />Sending...</> : <><Send className="w-4 h-4" />Send to {selectedIds.size} Candidates</>}
                 </button>
               </div>
             </div>
@@ -378,9 +595,7 @@ function CandidatesInner() {
               <div className="space-y-2 max-h-48 overflow-y-auto">
                 {bulkResults.map((result, i) => (
                   <div key={i} className={`flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-xs ${
-                    result.success
-                      ? "bg-emerald-500/5 border border-emerald-500/20"
-                      : "bg-red-500/5 border border-red-500/20"
+                    result.success ? "bg-emerald-500/5 border border-emerald-500/20" : "bg-red-500/5 border border-red-500/20"
                   }`}>
                     <span className={result.success ? "text-emerald-400" : "text-red-400"}>
                       {result.success ? "✅" : "❌"} {result.candidateName}
@@ -390,14 +605,130 @@ function CandidatesInner() {
                   </div>
                 ))}
               </div>
-              <button
-                onClick={() => setBulkResults(null)}
-                className="mt-3 text-xs text-slate-500 hover:text-white transition"
-              >
+              <button onClick={() => setBulkResults(null)} className="mt-3 text-xs text-slate-500 hover:text-white transition">
                 Dismiss results
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Bulk Interview Panel ── */}
+      {selectMode === "interview" && (
+        <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-6 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <p className="text-sm font-semibold text-white">
+                Bulk Interview — {selectedIds.size} candidate{selectedIds.size !== 1 ? "s" : ""} selected
+              </p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                AI will generate tailored questions for each candidate
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {/* Select all in current tab */}
+              <button
+                onClick={selectAllInTab}
+                className="px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-medium hover:bg-indigo-500/20 transition"
+              >
+                Select All in Tab ({eligibleInTab})
+              </button>
+              {/* Quick select by category */}
+              <div className="flex gap-1">
+                {(["NEW", "REVIEWED", "SHORTLISTED"] as const).map((s) => {
+                  const n = candidates.filter((c) => c.status === s && c.candidateEmail).length;
+                  if (!n) return null;
+                  return (
+                    <button
+                      key={s}
+                      onClick={() => selectAllByStatus(s)}
+                      className="px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-400 text-xs font-medium hover:bg-white/10 transition"
+                    >
+                      All {statusConfig[s].label} ({n})
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                onClick={deselectAll}
+                className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-400 text-xs font-medium hover:bg-white/10 transition"
+              >
+                Deselect All
+              </button>
+            </div>
+          </div>
+
+          {/* Mode picker */}
+          <div className="pt-4 border-t border-white/5">
+            <p className="text-xs font-semibold text-white uppercase tracking-wider mb-3">Interview Mode</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+
+              {/* ASYNC */}
+              <button
+                onClick={() => setBulkInterviewMode("ASYNC")}
+                className={`text-left rounded-xl border p-4 transition ${
+                  bulkInterviewMode === "ASYNC"
+                    ? "border-indigo-500 bg-indigo-500/10"
+                    : "border-white/10 bg-white/[0.02] hover:border-white/20"
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1.5">
+                  <MessageSquare className={`w-4 h-4 ${bulkInterviewMode === "ASYNC" ? "text-indigo-400" : "text-slate-500"}`} />
+                  <span className={`text-sm font-semibold ${bulkInterviewMode === "ASYNC" ? "text-white" : "text-slate-300"}`}>
+                    Async
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-400 uppercase">
+                    Recommended
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Each candidate gets a private link. They answer on their own time.
+                </p>
+              </button>
+
+              {/* LIVE */}
+              <button
+                onClick={() => setBulkInterviewMode("LIVE")}
+                className={`text-left rounded-xl border p-4 transition ${
+                  bulkInterviewMode === "LIVE"
+                    ? "border-violet-500 bg-violet-500/10"
+                    : "border-white/10 bg-white/[0.02] hover:border-white/20"
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1.5">
+                  <Video className={`w-4 h-4 ${bulkInterviewMode === "LIVE" ? "text-violet-400" : "text-slate-500"}`} />
+                  <span className={`text-sm font-semibold ${bulkInterviewMode === "LIVE" ? "text-white" : "text-slate-300"}`}>
+                    Live
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Schedule and conduct each interview with you present in real time.
+                </p>
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-xs text-slate-500">
+                {bulkInterviewMode === "ASYNC"
+                  ? `AI will generate questions + send ${selectedIds.size} candidate${selectedIds.size !== 1 ? "s" : ""} a private interview link`
+                  : bulkInterviewMode === "LIVE"
+                  ? `${selectedIds.size} live interview${selectedIds.size !== 1 ? "s" : ""} will be queued for scheduling`
+                  : "Choose a mode to continue"}
+              </p>
+              <button
+                onClick={handleBulkInterview}
+                disabled={bulkInterviewSending || selectedIds.size === 0 || !bulkInterviewMode}
+                className={`inline-flex items-center gap-2 px-6 py-3 rounded-xl text-white text-sm font-semibold transition disabled:opacity-50 ${
+                  bulkInterviewMode === "LIVE" ? "bg-violet-600 hover:bg-violet-500" : "bg-indigo-600 hover:bg-indigo-500"
+                }`}
+              >
+                {bulkInterviewSending
+                  ? <><Loader2 className="w-4 h-4 animate-spin" />Starting...</>
+                  : <><Zap className="w-4 h-4" />Interview {selectedIds.size} Candidate{selectedIds.size !== 1 ? "s" : ""}</>
+                }
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -478,13 +809,16 @@ function CandidatesInner() {
             const RecIcon = recConfig?.icon;
             const isSelected = selectedIds.has(candidate.id);
             const hasEmail = !!candidate.candidateEmail;
+            const inSelectMode = selectMode !== null;
 
             return (
               <div
                 key={candidate.id}
                 className={`rounded-2xl border transition ${
                   isSelected
-                    ? "border-blue-500/40 bg-blue-500/5"
+                    ? selectMode === "interview"
+                      ? "border-indigo-500/40 bg-indigo-500/5"
+                      : "border-blue-500/40 bg-blue-500/5"
                     : "border-white/5 bg-white/[0.02] hover:border-white/10"
                 }`}
               >
@@ -493,7 +827,7 @@ function CandidatesInner() {
                     <div className="flex items-start gap-4 flex-1 min-w-0">
 
                       {/* Checkbox (select mode) or Avatar */}
-                      {selectMode ? (
+                      {inSelectMode ? (
                         <button
                           onClick={() => hasEmail && toggleSelect(candidate.id)}
                           disabled={!hasEmail}
@@ -501,7 +835,9 @@ function CandidatesInner() {
                             !hasEmail
                               ? "bg-white/5 opacity-30 cursor-not-allowed"
                               : isSelected
-                              ? "bg-blue-500 border-2 border-blue-400"
+                              ? selectMode === "interview"
+                                ? "bg-indigo-500 border-2 border-indigo-400"
+                                : "bg-blue-500 border-2 border-blue-400"
                               : "bg-white/5 border-2 border-white/20 hover:border-blue-400"
                           }`}
                         >
@@ -567,7 +903,7 @@ function CandidatesInner() {
                     </div>
 
                     {/* Actions */}
-                    {!selectMode && (
+                    {!inSelectMode && (
                       <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 shrink-0">
                         <div className="flex gap-1.5">
                           {candidate.status !== "SHORTLISTED" && (
@@ -600,6 +936,15 @@ function CandidatesInner() {
                           )}
                         </div>
 
+                        {/* Interview button ← NEW */}
+                        <button
+                          onClick={() => handleInterviewClick(candidate)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-medium hover:bg-indigo-500/20 transition"
+                        >
+                          <Zap className="w-3 h-3" />
+                          Interview
+                        </button>
+
                         {candidate.candidateEmail && (
                           <Link
                             href={`/recruiter/candidates/${candidate.id}#email`}
@@ -620,8 +965,8 @@ function CandidatesInner() {
                       </div>
                     )}
 
-                    {/* Select mode indicator */}
-                    {selectMode && !hasEmail && (
+                    {/* Select mode — no email indicator */}
+                    {inSelectMode && !hasEmail && (
                       <span className="text-xs text-slate-600 shrink-0">No email</span>
                     )}
                   </div>

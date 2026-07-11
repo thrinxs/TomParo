@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, MessageSquare, CheckCircle, XCircle, Clock,
   Loader2, Trophy, Star, AlertTriangle, ChevronRight,
-  Copy, Send, Zap, Users, Briefcase, MapPin,
+  Copy, Send, Zap, Users, Briefcase, MapPin, Mic, MicOff,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -40,6 +40,20 @@ export default function InterviewDetailPage() {
   const [submittingAnswer, setSubmittingAnswer] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // ── Voice state for LIVE mode ──
+  const [isLiveRecording, setIsLiveRecording] = useState(false);
+  const [isSpeechSupported, setIsSpeechSupported] = useState(false);
+  const liveRecognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    setIsSpeechSupported(
+      !!(
+        (window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition
+      )
+    );
+  }, []);
+
   const fetchInterview = useCallback(async () => {
     try {
       const res = await fetch(`/api/recruiter/interviews/${interviewId}`);
@@ -67,10 +81,42 @@ export default function InterviewDetailPage() {
     toast.success("Interview link copied!");
   };
 
+  const handleToggleLiveRecording = () => {
+    if (isLiveRecording) {
+      liveRecognitionRef.current?.stop();
+      setIsLiveRecording(false);
+      return;
+    }
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.onresult = (event: any) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          setLiveAnswer((prev) => prev + event.results[i][0].transcript + " ");
+        }
+      }
+    };
+    recognition.onend = () => setIsLiveRecording(false);
+    recognition.onerror = () => setIsLiveRecording(false);
+    liveRecognitionRef.current = recognition;
+    recognition.start();
+    setIsLiveRecording(true);
+  };
+
   const handleSubmitLiveAnswer = async (questionId: string) => {
     if (!liveAnswer.trim()) {
       toast.error("Please enter an answer");
       return;
+    }
+    if (isLiveRecording) {
+      liveRecognitionRef.current?.stop();
+      setIsLiveRecording(false);
     }
     setSubmittingAnswer(true);
     try {
@@ -252,7 +298,7 @@ export default function InterviewDetailPage() {
         </div>
       </div>
 
-      {/* AI Summary — shown after completion */}
+      {/* AI Summary */}
       {isCompleted && interview.summary && (
         <div className="rounded-3xl border border-purple-500/20 bg-purple-500/5 p-8 space-y-6">
           <h3 className="text-lg font-semibold text-white flex items-center gap-2">
@@ -296,14 +342,11 @@ export default function InterviewDetailPage() {
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${typeConf.bg} ${typeConf.border} ${typeConf.color}`}>
                         {typeConf.label}
                       </span>
-                      {isAnswered && (
-                        <CheckCircle className="w-4 h-4 text-emerald-400" />
-                      )}
+                      {isAnswered && <CheckCircle className="w-4 h-4 text-emerald-400" />}
                     </div>
                     <p className="text-white text-sm font-medium leading-relaxed">{q.question}</p>
                   </div>
                 </div>
-
                 {isAnswered && q.aiScore != null && (
                   <div className="text-right shrink-0">
                     <p className={`text-2xl font-bold ${scoreColor(q.aiScore)}`}>{q.aiScore}</p>
@@ -312,7 +355,7 @@ export default function InterviewDetailPage() {
                 )}
               </div>
 
-              {/* Answer */}
+              {/* Answer section */}
               {isAnswered ? (
                 <div className="space-y-3 ml-10">
                   <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
@@ -330,17 +373,57 @@ export default function InterviewDetailPage() {
                 <div className="ml-10 space-y-3">
                   {isActive ? (
                     <>
+                      {/* Voice dictation for LIVE mode */}
+                      {isSpeechSupported && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleToggleLiveRecording}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                              isLiveRecording
+                                ? "bg-red-500/20 border border-red-500/40 text-red-400"
+                                : "bg-white/5 border border-white/10 text-slate-400 hover:text-white"
+                            }`}
+                          >
+                            {isLiveRecording ? (
+                              <>
+                                <span className="relative flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+                                </span>
+                                <MicOff className="w-3.5 h-3.5" />
+                                Stop Dictating
+                              </>
+                            ) : (
+                              <>
+                                <Mic className="w-3.5 h-3.5" />
+                                Dictate Answer
+                              </>
+                            )}
+                          </button>
+                          <span className="text-[10px] text-slate-600">
+                            Speak the candidate's answer aloud to capture it
+                          </span>
+                        </div>
+                      )}
+
                       <textarea
                         value={liveAnswer}
                         onChange={(e) => setLiveAnswer(e.target.value)}
-                        placeholder="Type the candidate's answer here..."
+                        placeholder={
+                          isLiveRecording
+                            ? "Listening... speak the candidate's answer"
+                            : "Type or dictate the candidate's answer here..."
+                        }
                         rows={4}
-                        className="w-full rounded-xl border border-white/10 bg-slate-900/50 px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-purple-500/50 resize-none transition"
+                        className={`w-full rounded-xl border bg-slate-900/50 px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-purple-500/50 resize-none transition ${
+                          isLiveRecording ? "border-red-500/30" : "border-white/10"
+                        }`}
                       />
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleSubmitLiveAnswer(q.id)}
-                          disabled={submittingAnswer}
+                          disabled={submittingAnswer || isLiveRecording}
                           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600 text-white text-sm font-semibold hover:bg-purple-500 transition disabled:opacity-50"
                         >
                           {submittingAnswer ? (
@@ -350,7 +433,12 @@ export default function InterviewDetailPage() {
                           )}
                         </button>
                         <button
-                          onClick={() => { setActiveQuestion(null); setLiveAnswer(""); }}
+                          onClick={() => {
+                            liveRecognitionRef.current?.stop();
+                            setIsLiveRecording(false);
+                            setActiveQuestion(null);
+                            setLiveAnswer("");
+                          }}
                           className="px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-slate-400 text-sm hover:text-white transition"
                         >
                           Cancel

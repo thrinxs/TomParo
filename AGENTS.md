@@ -72,7 +72,7 @@ tomparo/
 │ │ ├── signup/page.tsx # WORKING — toggle + password visibility + invite flow
 │ │ └── forgot-password/page.tsx
 │ ├── (dashboard)/ # User dashboard (sidebar layout)
-│ │ ├── layout.tsx
+│ │ ├── layout.tsx # UPDATED — sidebarOpen state + toggle handler passed to sidebar/topbar
 │ │ └── dashboard/
 │ │ ├── DashboardClient.tsx # Client component split
 │ │ ├── page.tsx # Dashboard home (WORKING)
@@ -87,7 +87,7 @@ tomparo/
 │ │ ├── history/page.tsx # History with tabs (WORKING)
 │ │ └── settings/page.tsx # Settings (WORKING)
 │ ├── (recruiter)/ # Recruiter dashboard (purple sidebar layout)
-│ │ ├── layout.tsx # RecruiterSidebar + RecruiterTopbar
+│ │ ├── layout.tsx # UPDATED — sidebarOpen state + toggle handler passed to sidebar/topbar
 │ │ └── recruiter/
 │ │ ├── page.tsx # Recruiter dashboard home (WORKING)
 │ │ ├── upload/page.tsx # Individual CV upload + AI analysis (WORKING)
@@ -98,13 +98,15 @@ tomparo/
 │ │ │ ├── new/page.tsx # Create job with AI write/review (WORKING)
 │ │ │ └── [id]/edit/page.tsx # Edit job (WORKING)
 │ │ ├── candidates/
-│ │ │ ├── page.tsx # Candidate list + bulk email UI (WORKING)
+│ │ │ ├── page.tsx # UPDATED — Interview button per card + InterviewModeModal + Bulk Interview panel + Select all by category
 │ │ │ └── [id]/page.tsx # Candidate detail + email panel + open tracking + history (WORKING)
 │ │ ├── pipeline/page.tsx # Kanban pipeline (WORKING)
 │ │ ├── analytics/page.tsx # Analytics dashboard (WORKING — Business+)
-│ │ ├── interviews/ # AI Interviews (PLANNED - Phase 5)
-│ │ │ ├── page.tsx # All interviews list
-│ │ │ └── [id]/page.tsx # Conduct/view interview
+│ │ ├── interviews/ # AI Interviews (🚧 IN PROGRESS - Phase 5)
+│ │ │ ├── page.tsx # All interviews list (PLANNED)
+│ │ │ ├── new/page.tsx # Create interview — receives candidateId + mode from candidates page (PLANNED)
+│ │ │ ├── bulk/page.tsx # Bulk interview creation — receives ids + mode query params (PLANNED)
+│ │ │ └── [id]/page.tsx # Conduct/view interview (PLANNED)
 │ │ ├── emails/page.tsx # AI emails (PLANNED - Growth+)
 │ │ ├── autopilot/page.tsx # AI autopilot (PLANNED - Enterprise+)
 │ │ ├── invite/
@@ -166,7 +168,7 @@ tomparo/
 │ ├── jobs/generate-field/route.ts
 │ ├── jobs/review-field/route.ts
 │ ├── candidates/route.ts
-│ ├── candidates/[id]/route.ts
+│ ├── candidates/[id]/route.ts # FIXED — PATCH status update bug resolved
 │ ├── talent-pool/route.ts # GET all applications
 │ ├── talent-pool/[id]/route.ts # GET single + PATCH status + DELETE
 │ ├── talent-pool/[id]/cv/route.ts # GET signed URL for CV preview/download
@@ -176,8 +178,8 @@ tomparo/
 │ ├── emails/bulk/route.ts # POST bulk email to multiple candidates (Business+)
 │ ├── analytics/route.ts # GET full analytics data (WORKING — Business+)
 │ ├── activity/route.ts # GET activity log
-│ ├── interviews/route.ts # PLANNED Phase 5
-│ ├── interviews/[id]/route.ts # PLANNED Phase 5
+│ ├── interviews/route.ts # 🚧 IN PROGRESS Phase 5
+│ ├── interviews/[id]/route.ts # 🚧 IN PROGRESS Phase 5
 │ ├── interviews/[id]/answer/route.ts # PLANNED Phase 5
 │ ├── interviews/[id]/complete/route.ts # PLANNED Phase 5
 │ ├── settings/route.ts # GET + PATCH recruiter profile
@@ -194,10 +196,10 @@ tomparo/
 │ ├── TawkChat.tsx
 │ ├── layout/
 │ │ ├── Navbar.tsx
-│ │ ├── DashboardSidebar.tsx
-│ │ ├── DashboardTopbar.tsx
-│ │ ├── RecruiterSidebar.tsx # Includes Talent Pool + Analytics nav items
-│ │ ├── RecruiterTopbar.tsx
+│ │ ├── DashboardSidebar.tsx # UPDATED — accepts isOpen prop, slides in/out on mobile
+│ │ ├── DashboardTopbar.tsx # UPDATED — hamburger button wired to toggle
+│ │ ├── RecruiterSidebar.tsx # UPDATED — major restructure, mobile-aware, accepts isOpen prop
+│ │ ├── RecruiterTopbar.tsx # UPDATED — hamburger button wired to toggle
 │ │ ├── AdminSidebar.tsx
 │ │ ├── StaffSidebar.tsx
 │ │ └── SupportSidebar.tsx
@@ -250,7 +252,7 @@ tomparo/
 │ ├── application-generator.ts
 │ ├── skill-gap-engine.ts
 │ ├── interview-coach.ts
-│ ├── interview-engine.ts # PLANNED Phase 5
+│ ├── interview-engine.ts # 🚧 IN PROGRESS Phase 5 — question array parsing fixed, question generation underway
 │ ├── career-intelligence.ts
 │ ├── chat-assistant.ts
 │ └── providers/
@@ -472,6 +474,33 @@ Stage 1: Job Creation → Stage 2: CV Screening → Stage 3: Interview Invite �
 
 - GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY (NOT CELEBRAS), MISTRAL_API_KEY, OPENROUTER_API_KEY, HUGGINGFACE_API_KEY
 
+### Mobile Sidebar Toggle System (WORKING)
+
+- `sidebarOpen` state lives in the **layout** (`app/(dashboard)/layout.tsx` and `app/(recruiter)/layout.tsx`)
+- Toggle handler is passed down as props to both the **Sidebar** and the **Topbar**
+- Sidebar accepts `isOpen` prop — slides in/out on mobile using this prop
+- Topbar contains the hamburger button — calls the toggle handler on click
+- RecruiterSidebar had a major restructure (large monolithic component → clean mobile-aware component)
+- Do NOT put sidebarOpen state inside the Sidebar or Topbar components — it lives in layout
+
+### Candidates Page — Interview + Bulk Selection System (WORKING)
+
+- **Interview button** on each candidate card — indigo colored, distinct from Email (blue) and View (purple)
+- Clicking **Interview** opens `InterviewModeModal` — a full-screen backdrop modal
+- **InterviewModeModal** lets recruiter choose:
+  - **ASYNC** (Recommended) — AI generates questions, sends candidate a private link, they answer on own time, recruiter reviews scored report later
+  - **LIVE** — recruiter conducts interview in real time with AI surfacing questions and scoring answers
+  - Confirm navigates to `/recruiter/interviews/new?candidateId=xxx&mode=ASYNC|LIVE&name=xxx`
+- **selectMode** is `"email" | "interview" | null` — NOT a boolean. Email and Interview bulk modes cannot be active at the same time
+- **Bulk Interview** button in header — indigo themed panel, separate from Bulk Email (blue themed)
+- **Bulk Email** button in header — unchanged blue themed panel
+- Both bulk panels share the same **selection system** (selectedIds Set)
+- **Select All in Tab** — selects all candidates with email visible in the current status tab
+- **Select All by Category** — "All New (23)", "All Reviewed (1)", "All Shortlisted (3)" — one-click select by status regardless of current tab
+- Candidate cards turn **indigo** when selected in interview mode, **blue** when selected in email mode
+- Bulk Interview confirm navigates to `/recruiter/interviews/bulk?ids=xxx,xxx&mode=ASYNC|LIVE`
+- Candidates without email addresses cannot be selected (checkbox disabled, "No email" label shown)
+
 ### Company Username (Apply Email) System
 
 - Every recruiter gets a unique `companySlug` (e.g. `thrinxs`)
@@ -546,7 +575,7 @@ Stage 1: Job Creation → Stage 2: CV Screening → Stage 3: Interview Invite �
 - AI personalizes each email individually if no custom message provided
 - 200ms delay between sends to avoid Resend rate limiting
 - Each email gets its own tracking pixel
-- UI on candidates page: select mode → checkboxes → compose panel → email type + job title + AI write → send
+- UI on candidates page: Bulk Email button → indigo select mode → checkboxes → compose panel → email type + job title + AI write → send
 - Results displayed inline: ✅ sent / ❌ failed per candidate
 - Returns summary: { total, successful, failed }
 
@@ -588,18 +617,19 @@ Stage 1: Job Creation → Stage 2: CV Screening → Stage 3: Interview Invite �
   - OWNER/ADMIN: can invite/remove members, change settings, full access
   - MEMBER: can upload CVs, manage jobs, send emails, view analytics — cannot manage team or billing
 
-### Phase 5 — AI Text Interviews (PLANNED)
+### Phase 5 — AI Interviews (🚧 IN PROGRESS — Business+)
 
+- **interview-engine.ts** is started — question array parsing bug fixed, question generation logic underway
+- **Interview modes:**
+  - **ASYNC** — AI generates 8–10 questions, sends candidate a unique private link. Candidate answers on their own time. AI scores each answer (0–10 + feedback) instantly on submission. Recruiter reviews the completed scored report at any time.
+  - **LIVE** — Recruiter conducts interview in real time. AI surfaces questions on screen, scores answers instantly as recruiter submits them, generates final summary + hire recommendation at the end.
+- **Launching an interview:** From the candidates page, click the **⚡ Interview** button on any card → **InterviewModeModal** appears → recruiter selects ASYNC or LIVE → navigates to `/recruiter/interviews/new?candidateId=xxx&mode=xxx`
+- **Bulk interviews:** Use **Bulk Interview** button in header → select candidates → choose ASYNC or LIVE → navigates to `/recruiter/interviews/bulk?ids=xxx,xxx&mode=xxx`
 - Question generation based on 4 sources:
-  1. CV verification — questions that verify CV content ("You listed 3 years at Zenith Bank — describe your key responsibilities")
-  2. Location-based — questions relevant to candidate's city/country (from CV aiAnalysis.candidateLocation + application form)
+  1. CV verification — questions that verify CV content
+  2. Location-based — questions relevant to candidate's city/country (from CV aiAnalysis.candidateLocation)
   3. Job description — questions based on job requirements and responsibilities
   4. Behavioural / culture fit
-- Both modes: ASYNC (candidate answers on own time via shareable link) + LIVE (recruiter conducts in real time)
-- 8-10 questions per interview
-- Per-answer AI scoring (0-10 + detailed feedback)
-- Final AI summary + hire recommendation after all answers submitted
-- Interview launched from: candidate detail page ("Start Interview" button) + /recruiter/interviews sidebar
 - Interview statuses: PENDING → IN_PROGRESS → COMPLETED / CANCELLED
 
 ### Yearly Pricing Toggle
@@ -851,21 +881,38 @@ CV upload + AI analysis, Job matching, Cover letter (DOCX), Application email (3
 - Analytics dashboard (Business+) — CVs, applications, jobs, emails, pipeline breakdown, hire rate, top jobs, activity feed
 - Activity log — auto-logged on all key recruiter actions
 - Team seats — plan-gated seat limits, invite by email, role-based access (Owner/Admin/Member)
-- Team invite flow:
-  - Invite email sent via Resend
-  - Accept page (PUBLIC) shows company details + role + permissions
-  - "Create Account" → signup page with company pre-filled + locked
-  - After signup → auto-accepted → /recruiter dashboard
-  - "Already have account?" → signin → back to accept
+- Team invite flow — invite email, public accept page, signup flow, auto-accept after signup
+
+**Bug Fixes & Polish (2026-07-11):**
+
+- ✅ Mobile sidebar toggle — DashboardSidebar + RecruiterSidebar now fully mobile responsive. sidebarOpen state lives in layout, passed to Sidebar (isOpen prop) and Topbar (toggle handler). RecruiterSidebar was fully restructured.
+- ✅ Candidate status update bug — PATCH on `/api/recruiter/candidates/[id]` fixed
+- ✅ AI interview question array parsing — interview-engine.ts fixed to handle array vs string inconsistency from AI providers
+
+**Recruiter Platform — Phase 5 🚧 IN PROGRESS:**
+
+- ✅ interview-engine.ts — started, question array parsing fixed
+- ✅ Candidates page — Interview button per card (indigo, ⚡ icon)
+- ✅ InterviewModeModal — ASYNC vs LIVE choice with clear explanations, navigates to /recruiter/interviews/new
+- ✅ Bulk Interview panel — separate from bulk email, indigo themed, ASYNC/LIVE mode picker, select all in tab + select all by category
+- ✅ selectMode refactored from boolean to `"email" | "interview" | null` — modes cannot overlap
+- ⬜ Schema: RecruiterInterview + RecruiterInterviewQuestion + enums (not yet pushed)
+- ⬜ API routes: POST/GET /api/recruiter/interviews, answer, complete
+- ⬜ /recruiter/interviews page (list)
+- ⬜ /recruiter/interviews/new page (create — receives candidateId + mode)
+- ⬜ /recruiter/interviews/bulk page (bulk create — receives ids + mode)
+- ⬜ /recruiter/interviews/[id] page (conduct/view)
 
 ---
 
 ## ⏳ Remaining Phases
 
-### Phase 5: AI Interviews (Business+)
+### Phase 5: AI Interviews (Business+) — 🚧 IN PROGRESS
 
+- [x] interview-engine.ts — question array parsing fixed, generation underway
+- [x] Candidates page — Interview button + InterviewModeModal + Bulk Interview panel
 - [ ] Schema: RecruiterInterview + RecruiterInterviewQuestion + InterviewStatus + InterviewMode enums
-- [ ] lib/ai/interview-engine.ts — generate questions (CV verification + location + job + behavioural), score answers (0-10 + feedback), generate final summary + hire recommendation
+- [ ] lib/ai/interview-engine.ts — complete: generate questions (CV verification + location + job + behavioural), score answers (0-10 + feedback), generate final summary + hire recommendation
 - [ ] POST /api/recruiter/interviews — create interview + AI generates questions
 - [ ] GET /api/recruiter/interviews — list all interviews
 - [ ] GET /api/recruiter/interviews/[id] — get interview + all questions
@@ -873,8 +920,9 @@ CV upload + AI analysis, Job matching, Cover letter (DOCX), Application email (3
 - [ ] POST /api/recruiter/interviews/[id]/complete — AI generates final summary + recommendation
 - [ ] DELETE /api/recruiter/interviews/[id]
 - [ ] /recruiter/interviews page — all interviews list with status + scores
+- [ ] /recruiter/interviews/new page — create interview (candidateId + mode pre-filled from query params)
+- [ ] /recruiter/interviews/bulk page — bulk interview creation (ids + mode from query params)
 - [ ] /recruiter/interviews/[id] page — conduct/view interview (both ASYNC + LIVE modes)
-- [ ] Update candidate detail page — "Start Interview" button
 - [ ] Interview scheduler — pick date/time, generate meeting link, send to candidate, candidate confirms
 - [ ] Calendar integration — Google Calendar + Outlook
 - [ ] Candidate timeline view — Applied → Reviewed → Interviewed → Offer → Hired
@@ -939,7 +987,22 @@ CV upload + AI analysis, Job matching, Cover letter (DOCX), Application email (3
 
 ## Migration History
 
-### Phase 4 — Analytics, Team Seats, Activity Log (Latest)
+### Phase 5 Start — AI Interviews UI + Bug Fixes (2026-07-11)
+
+- Fixed mobile sidebar toggle — sidebarOpen state moved to layout.tsx for both dashboard + recruiter layouts
+- RecruiterSidebar fully restructured — now mobile-aware, accepts isOpen prop
+- Fixed candidate status PATCH bug in /api/recruiter/candidates/[id]/route.ts
+- Started lib/ai/interview-engine.ts — fixed AI question array parsing bug
+- Updated candidates/page.tsx:
+  - Added ⚡ Interview button to every candidate card (indigo color)
+  - Added InterviewModeModal — ASYNC vs LIVE selection with explanations + navigation
+  - Added Bulk Interview panel (indigo themed) — separate from Bulk Email
+  - Refactored selectMode from boolean → `"email" | "interview" | null`
+  - Added Select All in Tab — selects all candidates with email in current status tab
+  - Added Select All by Category — All New / All Reviewed / All Shortlisted buttons
+  - Candidate cards highlight indigo in interview mode, blue in email mode
+
+### Phase 4 — Analytics, Team Seats, Activity Log
 
 - Added RecruiterActivityLog, RecruiterTeamMember, RecruiterInvite models to schema
 - Added ActivityType, TeamRole, InviteStatus enums
@@ -1060,6 +1123,11 @@ Long-term vision: The **AI Career Passport** becomes every professional's living
 - **Team roles:** OWNER/ADMIN can invite/remove/manage settings. MEMBER can use dashboard features but not team/billing
 - **Activity logging:** Always use logActivity() helper — silently fails, never breaks main flow
 - **Analytics plan gate:** Business+ only — GET /api/recruiter/analytics returns 403 for lower plans
-- **Interview questions based on:** CV content verification + candidate location (CV + application form) + job description + behavioural
-- **Interview modes:** ASYNC (candidate answers alone via shareable link) + LIVE (recruiter conducts in real time)
-- **Interview location source:** CV aiAnalysis.candidateLocation field + application form location field
+- **Mobile sidebar state:** sidebarOpen lives in layout.tsx — passed as isOpen to Sidebar, as onToggle to Topbar. Never put this state inside the Sidebar or Topbar components.
+- **selectMode on candidates page:** Is `"email" | "interview" | null` — NOT a boolean. Check `selectMode === "email"` or `selectMode === "interview"`. Both modes share selectedIds but cannot be active simultaneously.
+- **Interview button color:** Indigo — distinct from Email (blue) and View (purple)
+- **InterviewModeModal:** Opened by clicking Interview button on a candidate card. ASYNC = recommended, sends link. LIVE = recruiter present. On confirm → navigates to /recruiter/interviews/new?candidateId=xxx&mode=xxx&name=xxx
+- **Bulk Interview route:** /recruiter/interviews/bulk?ids=xxx,xxx&mode=ASYNC|LIVE
+- **Interview questions based on:** CV content verification + candidate location (CV aiAnalysis.candidateLocation) + job description + behavioural
+- **Interview modes:** ASYNC (candidate answers alone via private link) + LIVE (recruiter conducts in real time)
+- **interview-engine.ts:** AI may return questions as array of strings or array of objects — always normalise before storing

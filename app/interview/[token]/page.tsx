@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useParams } from "next/navigation";
 import {
   MessageSquare, CheckCircle, Loader2, Send,
-  Clock, Trophy, Star, ChevronRight, AlertTriangle,
+  Star, ChevronRight, AlertTriangle,
+  Mic, MicOff, Type,
 } from "lucide-react";
 
 const questionTypeLabels: Record<string, string> = {
@@ -17,6 +18,110 @@ const questionTypeLabels: Record<string, string> = {
 const scoreColor = (score: number) =>
   score >= 8 ? "text-emerald-400" : score >= 5 ? "text-amber-400" : "text-red-400";
 
+function useSpeechRecognition() {
+  const [isRecording, setIsRecording] = useState(false);
+  const [isSupported, setIsSupported] = useState(false);
+  const [interimText, setInterimText] = useState("");
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+    setIsSupported(!!SpeechRecognition);
+  }, []);
+
+  const startRecording = (onFinalTranscript: (text: string) => void) => {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    recognition.onresult = (event: any) => {
+      let interim = "";
+      let final = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          final += transcript + " ";
+        } else {
+          interim += transcript;
+        }
+      }
+      if (final) onFinalTranscript(final);
+      setInterimText(interim);
+    };
+
+    recognition.onerror = () => {
+      setIsRecording(false);
+      setInterimText("");
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+      setInterimText("");
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsRecording(true);
+    setInterimText("");
+  };
+
+  const stopRecording = () => {
+    recognitionRef.current?.stop();
+    setIsRecording(false);
+    setInterimText("");
+  };
+
+  return { isRecording, isSupported, interimText, startRecording, stopRecording };
+}
+
+function MicButton({
+  isRecording,
+  isSupported,
+  onToggle,
+}: {
+  isRecording: boolean;
+  isSupported: boolean;
+  onToggle: () => void;
+}) {
+  if (!isSupported) return null;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={isRecording ? "Stop recording" : "Answer with voice"}
+      className={`relative inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition ${
+        isRecording
+          ? "bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30"
+          : "bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10"
+      }`}
+    >
+      {isRecording ? (
+        <>
+          <span className="absolute -top-1 -right-1 w-2.5 h-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+          </span>
+          <MicOff className="w-4 h-4" />
+          Stop
+        </>
+      ) : (
+        <>
+          <Mic className="w-4 h-4" />
+          Voice
+        </>
+      )}
+    </button>
+  );
+}
+
 function InterviewSession() {
   const params = useParams();
   const token = params.token as string;
@@ -26,8 +131,12 @@ function InterviewSession() {
   const [error, setError] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answer, setAnswer] = useState("");
+  const [answerMode, setAnswerMode] = useState<"text" | "voice">("text");
   const [submitting, setSubmitting] = useState(false);
   const [justScored, setJustScored] = useState<{ score: number; feedback: string } | null>(null);
+
+  const { isRecording, isSupported, interimText, startRecording, stopRecording } =
+    useSpeechRecognition();
 
   useEffect(() => {
     const loadInterview = async () => {
@@ -39,7 +148,6 @@ function InterviewSession() {
           return;
         }
         setInterview(data.interview);
-        // Find first unanswered question
         const firstUnanswered = data.interview.questions.findIndex((q: any) => !q.answered);
         setCurrentIndex(firstUnanswered === -1 ? 0 : firstUnanswered);
       } catch {
@@ -51,8 +159,26 @@ function InterviewSession() {
     loadInterview();
   }, [token]);
 
+  useEffect(() => {
+    if (isRecording) stopRecording();
+    setAnswer("");
+    setAnswerMode("text");
+  }, [currentIndex]);
+
+  const handleToggleRecording = () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      setAnswerMode("voice");
+      startRecording((finalText) => {
+        setAnswer((prev) => prev + finalText);
+      });
+    }
+  };
+
   const handleSubmitAnswer = async () => {
     if (!answer.trim()) return;
+    if (isRecording) stopRecording();
     const question = interview.questions[currentIndex];
     setSubmitting(true);
     try {
@@ -61,7 +187,7 @@ function InterviewSession() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           questionId: question.id,
-          answer,
+          answer: answer.trim(),
           shareToken: token,
         }),
       });
@@ -69,8 +195,6 @@ function InterviewSession() {
       if (!res.ok) throw new Error(data.error);
 
       setJustScored({ score: data.score, feedback: data.feedback });
-
-      // Update local state
       setInterview((prev: any) => ({
         ...prev,
         answeredQuestions: prev.answeredQuestions + 1,
@@ -80,8 +204,8 @@ function InterviewSession() {
             : q
         ),
       }));
-
       setAnswer("");
+      setAnswerMode("text");
     } catch (err: any) {
       setError(err.message || "Failed to submit answer");
     } finally {
@@ -97,7 +221,6 @@ function InterviewSession() {
     if (nextUnanswered !== -1) {
       setCurrentIndex(nextUnanswered);
     } else {
-      // Find any remaining unanswered
       const anyUnanswered = interview.questions.findIndex((q: any) => !q.answered);
       if (anyUnanswered !== -1) setCurrentIndex(anyUnanswered);
     }
@@ -129,10 +252,10 @@ function InterviewSession() {
   const answeredCount = interview.questions.filter((q: any) => q.answered).length;
   const progress = Math.round((answeredCount / interview.totalQuestions) * 100);
   const currentQuestion = interview.questions[currentIndex];
-  const avgScore = interview.questions
-    .filter((q: any) => q.answered && q.aiScore != null)
-    .reduce((sum: number, q: any) => sum + q.aiScore, 0) /
-    (answeredCount || 1);
+  const avgScore =
+    interview.questions
+      .filter((q: any) => q.answered && q.aiScore != null)
+      .reduce((sum: number, q: any) => sum + q.aiScore, 0) / (answeredCount || 1);
 
   return (
     <div className="min-h-screen bg-[#0a0a0f]">
@@ -148,7 +271,6 @@ function InterviewSession() {
             <p className="text-white font-semibold text-sm">{progress}% complete</p>
           </div>
         </div>
-        {/* Progress bar */}
         <div className="h-1 bg-white/5">
           <div
             className="h-1 bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-500"
@@ -159,7 +281,7 @@ function InterviewSession() {
 
       <div className="max-w-3xl mx-auto px-6 py-10 space-y-8">
 
-        {/* Welcome header */}
+        {/* Welcome */}
         <div className="text-center">
           <div className="w-16 h-16 rounded-2xl bg-purple-500/20 flex items-center justify-center mx-auto mb-4">
             <MessageSquare className="w-8 h-8 text-purple-400" />
@@ -168,12 +290,18 @@ function InterviewSession() {
             Hi, {interview.candidateName}!
           </h1>
           <p className="text-slate-400 text-sm max-w-md mx-auto">
-            Answer each question thoughtfully. AI will score your answers in real time.
+            Answer each question by typing or using your voice. AI scores your answers in real time.
             Take your time — there's no timer.
           </p>
+          {isSupported && (
+            <p className="text-xs text-indigo-400 mt-2 flex items-center justify-center gap-1.5">
+              <Mic className="w-3 h-3" />
+              Voice answering is available — click the Voice button on any question
+            </p>
+          )}
         </div>
 
-        {/* All answered — completion screen */}
+        {/* All answered */}
         {allAnswered ? (
           <div className="rounded-3xl border border-emerald-500/20 bg-emerald-500/5 p-10 text-center space-y-6">
             <CheckCircle className="w-16 h-16 text-emerald-400 mx-auto" />
@@ -211,9 +339,11 @@ function InterviewSession() {
                 {justScored ? (
                   <div className="space-y-4">
                     <div className={`text-center p-6 rounded-2xl border ${
-                      justScored.score >= 8 ? "border-emerald-500/20 bg-emerald-500/5"
-                      : justScored.score >= 5 ? "border-amber-500/20 bg-amber-500/5"
-                      : "border-red-500/20 bg-red-500/5"
+                      justScored.score >= 8
+                        ? "border-emerald-500/20 bg-emerald-500/5"
+                        : justScored.score >= 5
+                        ? "border-amber-500/20 bg-amber-500/5"
+                        : "border-red-500/20 bg-red-500/5"
                     }`}>
                       <p className={`text-4xl font-bold ${scoreColor(justScored.score)} mb-1`}>
                         {justScored.score}/10
@@ -228,21 +358,115 @@ function InterviewSession() {
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    <textarea
-                      value={answer}
-                      onChange={(e) => setAnswer(e.target.value)}
-                      placeholder="Type your answer here..."
-                      rows={6}
-                      className="w-full rounded-xl border border-white/10 bg-slate-900/50 px-4 py-3 text-white placeholder-slate-500 outline-none focus:border-purple-500/50 focus:ring-2 focus:ring-purple-500/20 resize-none transition text-sm"
-                    />
+                  <div className="space-y-3">
+
+                    {/* Answer mode toggle */}
+                    {isSupported && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => { stopRecording(); setAnswerMode("text"); }}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                            answerMode === "text"
+                              ? "bg-white/10 text-white"
+                              : "text-slate-500 hover:text-white"
+                          }`}
+                        >
+                          <Type className="w-3.5 h-3.5" /> Type
+                        </button>
+                        <button
+                          onClick={() => setAnswerMode("voice")}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                            answerMode === "voice"
+                              ? "bg-white/10 text-white"
+                              : "text-slate-500 hover:text-white"
+                          }`}
+                        >
+                          <Mic className="w-3.5 h-3.5" /> Voice
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Text mode */}
+                    {answerMode === "text" && (
+                      <textarea
+                        value={answer}
+                        onChange={(e) => setAnswer(e.target.value)}
+                        placeholder="Type your answer here..."
+                        rows={6}
+                        className="w-full rounded-xl border border-white/10 bg-slate-900/50 px-4 py-3 text-white placeholder-slate-500 outline-none focus:border-purple-500/50 focus:ring-2 focus:ring-purple-500/20 resize-none transition text-sm"
+                      />
+                    )}
+
+                    {/* Voice mode */}
+                    {answerMode === "voice" && (
+                      <div className="space-y-3">
+                        <div className={`relative rounded-xl border px-4 py-4 min-h-[9rem] transition ${
+                          isRecording
+                            ? "border-red-500/40 bg-red-500/5"
+                            : "border-white/10 bg-slate-900/50"
+                        }`}>
+                          {(answer || interimText) ? (
+                            <p className="text-sm leading-relaxed">
+                              <span className="text-white">{answer}</span>
+                              {interimText && (
+                                <span className="text-slate-500">{interimText}</span>
+                              )}
+                            </p>
+                          ) : (
+                            <p className="text-slate-500 text-sm">
+                              {isRecording
+                                ? "Listening... speak clearly into your microphone"
+                                : "Press the microphone button and start speaking"}
+                            </p>
+                          )}
+                          {isRecording && (
+                            <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                              <span className="relative flex h-2.5 w-2.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+                              </span>
+                              <span className="text-[10px] text-red-400 font-medium uppercase tracking-wide">
+                                Recording
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <MicButton
+                            isRecording={isRecording}
+                            isSupported={isSupported}
+                            onToggle={handleToggleRecording}
+                          />
+                          {answer && !isRecording && (
+                            <button
+                              onClick={() => setAnswer("")}
+                              className="px-3 py-2.5 rounded-xl text-xs text-slate-500 hover:text-white border border-white/5 hover:border-white/10 transition"
+                            >
+                              Clear
+                            </button>
+                          )}
+                          {answer && (
+                            <p className="text-xs text-slate-500 ml-auto">
+                              {answer.split(" ").filter(Boolean).length} words captured
+                            </p>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-600 flex items-center gap-1">
+                          💡 Works best in Chrome or Edge · Allow microphone access when prompted
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Submit */}
                     <button
                       onClick={handleSubmitAnswer}
-                      disabled={submitting || !answer.trim()}
+                      disabled={submitting || !answer.trim() || isRecording}
                       className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-purple-600 text-white font-semibold hover:bg-purple-500 transition disabled:opacity-50"
                     >
                       {submitting ? (
                         <><Loader2 className="w-4 h-4 animate-spin" />Scoring your answer...</>
+                      ) : isRecording ? (
+                        <><MicOff className="w-4 h-4" />Stop recording first</>
                       ) : (
                         <><Send className="w-4 h-4" />Submit Answer</>
                       )}
@@ -268,12 +492,20 @@ function InterviewSession() {
                         ? "bg-emerald-500/5 border border-emerald-500/10"
                         : "bg-white/[0.02] border border-white/5 hover:bg-white/5"
                     }`}
-                    onClick={() => { if (!q.answered) { setCurrentIndex(i); setJustScored(null); } }}
+                    onClick={() => {
+                      if (!q.answered) {
+                        if (isRecording) stopRecording();
+                        setCurrentIndex(i);
+                        setJustScored(null);
+                      }
+                    }}
                   >
                     <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${
-                      q.answered ? "bg-emerald-500/20 text-emerald-400"
-                      : i === currentIndex ? "bg-purple-500/20 text-purple-400"
-                      : "bg-white/5 text-slate-500"
+                      q.answered
+                        ? "bg-emerald-500/20 text-emerald-400"
+                        : i === currentIndex
+                        ? "bg-purple-500/20 text-purple-400"
+                        : "bg-white/5 text-slate-500"
                     }`}>
                       {q.answered ? "✓" : i + 1}
                     </div>
