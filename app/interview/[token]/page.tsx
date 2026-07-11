@@ -3,18 +3,47 @@
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useParams } from "next/navigation";
 import {
-  Mic, MicOff, Loader2, CheckCircle, AlertTriangle,
+  Mic, Loader2, CheckCircle, AlertTriangle,
   Volume2, VolumeX, SkipForward, RotateCcw, Send,
-  User, Calendar, ChevronRight, Star, MessageSquare,
+  User, Calendar, ChevronRight, MessageSquare,
+  Play, Sliders,
 } from "lucide-react";
 
-// ── Constants ──────────────────────────────────────────────────────────────────
-const SILENCE_THRESHOLD = 8;        // audio level 0-255 below which = silence
-const SILENCE_REPEAT_MS = 3000;     // 3s silence → repeat question
-const SILENCE_SKIP_MS = 5000;       // 5s more → skip question
-const POLL_INTERVAL_MS = 3000;      // live detection polling
+// ── Pace settings ──────────────────────────────────────────────────────────────
+const PACE_OPTIONS = [
+  {
+    key: "relaxed",
+    label: "Relaxed",
+    emoji: "🐢",
+    silenceRepeat: 6000,
+    silenceSkip: 10000,
+    speechRate: 0.78,
+    desc: "AI waits 6 seconds before repeating, 10 more before skipping. Good for careful thinkers.",
+  },
+  {
+    key: "normal",
+    label: "Normal",
+    emoji: "🚶",
+    silenceRepeat: 3000,
+    silenceSkip: 5000,
+    speechRate: 0.92,
+    desc: "AI waits 3 seconds before repeating, 5 more before skipping. Balanced pace.",
+  },
+  {
+    key: "fast",
+    label: "Fast",
+    emoji: "🏃",
+    silenceRepeat: 1500,
+    silenceSkip: 3000,
+    speechRate: 1.1,
+    desc: "AI waits 1.5 seconds before repeating, 3 more before skipping. Quick and efficient.",
+  },
+];
 
-// ── Common male/female name lists for voice selection ─────────────────────────
+const SILENCE_THRESHOLD = 8;
+const POLL_INTERVAL_MS = 3000;
+
+// ── Name lists ─────────────────────────────────────────────────────────────────
 const MALE_NAMES = new Set([
   "james","john","robert","michael","william","david","richard","joseph","charles",
   "thomas","christopher","daniel","paul","mark","donald","george","kenneth","steven",
@@ -30,13 +59,12 @@ const MALE_NAMES = new Set([
   "bryan","tony","luis","mike","stanley","leonard","nathan","dale","manuel",
   "rodney","curtis","norman","allen","marvin","vincent","glenn","jeffery","travis",
   "jeff","chad","jacob","lee","melvin","alfred","kyle","francis","bradley","jesus",
-  "herbert","frederick","ray","joel","edwin","don","troy","henry","alan","barry",
-  "alexander","bernard","mario","leo","angel","leroy","andres","brett",
-  // Nigerian names
+  "herbert","frederick","ray","joel","edwin","don","troy","barry","alexander",
+  "bernard","mario","leo","angel","leroy","andres","brett",
   "emeka","chidi","tunde","femi","seun","kunle","niyi","taiwo","kehinde","babatunde",
   "adewale","adebayo","oluwaseun","olumide","olusegun","chukwuemeka","ifeanyi",
   "obinna","chibuike","ugochukwu","kelechi","nnamdi","chinedu","ike","ikenna",
-  "amara","eze","uche","uzoma","chukwuma","obi","emeka","chibundo","chisom",
+  "amara","eze","uche","uzoma","chukwuma","obi","chibundo","chisom",
 ]);
 
 const FEMALE_NAMES = new Set([
@@ -51,11 +79,10 @@ const FEMALE_NAMES = new Set([
   "ann","jean","alice","kathryn","gloria","teresa","doris","sara","janice","julia",
   "marie","madison","grace","judy","theresa","beverly","denise","marilyn","amber",
   "danielle","brittany","diana","abigail","jane","lori","alexandria","kayla",
-  // Nigerian names
   "ngozi","chioma","amaka","adaeze","adaora","nneka","chinwe","ifeoma","obiageli",
   "nkiruka","chinyere","ugochi","adanna","uju","ogechi","chizoba","amarachi",
   "tolani","folake","bimpe","sade","yetunde","gbemi","ronke","bisi","funke",
-  "tope","kemi","wura","shade","bunmi","toyin","ade","abike","yinka","lola",
+  "tope","kemi","wura","shade","bunmi","toyin","abike","yinka","lola",
 ]);
 
 function detectGenderFromName(name: string): "male" | "female" | null {
@@ -65,55 +92,62 @@ function detectGenderFromName(name: string): "male" | "female" | null {
   return null;
 }
 
-// ── Speech Synthesis ───────────────────────────────────────────────────────────
-function getVoice(gender: "male" | "female" | "prefer-not-to-say"): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis.getVoices();
+// ── Speech helpers ─────────────────────────────────────────────────────────────
+function getEnglishVoices(): SpeechSynthesisVoice[] {
+  return window.speechSynthesis
+    .getVoices()
+    .filter((v) => v.lang.startsWith("en"))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function getDefaultVoice(
+  gender: "male" | "female" | "prefer-not-to-say",
+  voices: SpeechSynthesisVoice[]
+): SpeechSynthesisVoice | null {
   if (!voices.length) return null;
-
   const target = gender === "prefer-not-to-say" ? null : gender;
-
-  const priority = target === "male"
-    ? ["Google UK English Male", "Microsoft David", "Daniel", "Alex"]
-    : target === "female"
-    ? ["Google UK English Female", "Microsoft Zira", "Samantha", "Karen"]
-    : [];
-
+  const priority =
+    target === "male"
+      ? ["Google UK English Male", "Microsoft David", "Daniel", "Alex"]
+      : target === "female"
+      ? ["Google UK English Female", "Microsoft Zira", "Samantha", "Karen"]
+      : [];
   for (const name of priority) {
     const found = voices.find((v) => v.name.toLowerCase().includes(name.toLowerCase()));
     if (found) return found;
   }
-
-  // Fallback — search by gender keyword in voice name
   if (target) {
-    const fallback = voices.find((v) =>
-      v.name.toLowerCase().includes(target) && v.lang.startsWith("en")
-    );
+    const fallback = voices.find((v) => v.name.toLowerCase().includes(target));
     if (fallback) return fallback;
   }
-
-  // Last resort — any English voice
-  return voices.find((v) => v.lang.startsWith("en")) || voices[0] || null;
+  return voices[0] || null;
 }
 
-function speak(
+function speakWith(
   text: string,
+  voiceName: string | null,
   gender: "male" | "female" | "prefer-not-to-say",
+  rate: number,
   onEnd?: () => void
 ): SpeechSynthesisUtterance {
   window.speechSynthesis.cancel();
   const utter = new SpeechSynthesisUtterance(text);
-  utter.rate = 0.92;
+  utter.rate = rate;
   utter.pitch = gender === "male" ? 0.85 : gender === "female" ? 1.1 : 1.0;
   utter.volume = 1;
-  const voice = getVoice(gender);
-  if (voice) utter.voice = voice;
+
+  const voices = getEnglishVoices();
+  if (voiceName) {
+    const found = voices.find((v) => v.name === voiceName);
+    if (found) utter.voice = found;
+  } else {
+    const def = getDefaultVoice(gender, voices);
+    if (def) utter.voice = def;
+  }
+
   if (onEnd) utter.onend = onEnd;
   window.speechSynthesis.speak(utter);
   return utter;
-}
-
-function stopSpeaking() {
-  window.speechSynthesis.cancel();
 }
 
 // ── Setup Screen ───────────────────────────────────────────────────────────────
@@ -128,25 +162,83 @@ function SetupScreen({
   jobTitle: string | null;
   companyName: string | null;
   interviewType: string;
-  onStart: (gender: "male" | "female" | "prefer-not-to-say", dob: string) => void;
+  onStart: (
+    gender: "male" | "female" | "prefer-not-to-say",
+    dob: string,
+    paceIndex: number,
+    voiceName: string | null
+  ) => void;
 }) {
   const detected = detectGenderFromName(candidateName);
-  const [gender, setGender] = useState<"male" | "female" | "prefer-not-to-say">(detected || "prefer-not-to-say");
+  const [gender, setGender] = useState<"male" | "female" | "prefer-not-to-say">(
+    detected || "prefer-not-to-say"
+  );
   const [dob, setDob] = useState("");
   const [dobError, setDobError] = useState("");
+  const [paceIndex, setPaceIndex] = useState(1); // default Normal
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoiceName, setSelectedVoiceName] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+
+  // Load voices
+  useEffect(() => {
+    if (interviewType !== "VOICE") return;
+    const load = () => {
+      const v = getEnglishVoices();
+      setAvailableVoices(v);
+      // Auto-select default based on gender
+      const def = getDefaultVoice(gender, v);
+      if (def && !selectedVoiceName) setSelectedVoiceName(def.name);
+    };
+    load();
+    window.speechSynthesis.onvoiceschanged = load;
+    return () => { window.speechSynthesis.onvoiceschanged = null; };
+  }, [interviewType, gender]);
+
+  // Update default voice when gender changes
+  useEffect(() => {
+    if (!availableVoices.length) return;
+    const def = getDefaultVoice(gender, availableVoices);
+    if (def) setSelectedVoiceName(def.name);
+  }, [gender]);
+
+  const handlePreviewPace = () => {
+    if (previewing) { window.speechSynthesis.cancel(); setPreviewing(false); return; }
+    const pace = PACE_OPTIONS[paceIndex];
+    setPreviewing(true);
+    speakWith(
+      `Hello! I'm your AI interviewer. This is how I'll sound during your interview. I will read each question clearly, and wait for your response.`,
+      selectedVoiceName,
+      gender,
+      pace.speechRate,
+      () => setPreviewing(false)
+    );
+  };
+
+  const handlePreviewVoice = (voiceName: string) => {
+    window.speechSynthesis.cancel();
+    speakWith(
+      "Hello! I'm your AI interviewer for today.",
+      voiceName,
+      gender,
+      PACE_OPTIONS[paceIndex].speechRate,
+    );
+  };
 
   const handleStart = () => {
     if (!dob) { setDobError("Please enter your date of birth"); return; }
     const age = Math.floor((Date.now() - new Date(dob).getTime()) / (1000 * 60 * 60 * 24 * 365));
     if (age < 16 || age > 100) { setDobError("Please enter a valid date of birth"); return; }
-    onStart(gender, dob);
+    window.speechSynthesis.cancel();
+    onStart(gender, dob, paceIndex, selectedVoiceName);
   };
 
   const typeLabel = interviewType === "VOICE" ? "Voice Call" : interviewType === "VIDEO" ? "Video" : "Text";
+  const pace = PACE_OPTIONS[paceIndex];
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center p-6">
-      <div className="w-full max-w-md space-y-6">
+      <div className="w-full max-w-md space-y-5">
 
         {/* Header */}
         <div className="text-center">
@@ -166,8 +258,6 @@ function SetupScreen({
         <div className={`rounded-2xl border p-4 text-center ${
           interviewType === "VOICE"
             ? "border-violet-500/20 bg-violet-500/5"
-            : interviewType === "VIDEO"
-            ? "border-pink-500/20 bg-pink-500/5"
             : "border-indigo-500/20 bg-indigo-500/5"
         }`}>
           {interviewType === "VOICE" && (
@@ -217,11 +307,6 @@ function SetupScreen({
               </button>
             ))}
           </div>
-          {interviewType === "VOICE" && (
-            <p className="text-[10px] text-slate-500">
-              This helps us match the AI voice to your preference.
-            </p>
-          )}
         </div>
 
         {/* Date of birth */}
@@ -240,6 +325,97 @@ function SetupScreen({
           {dobError && <p className="text-xs text-red-400">{dobError}</p>}
         </div>
 
+        {/* ── VOICE ONLY: Pace Slider ── */}
+        {interviewType === "VOICE" && (
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-slate-400" />
+              <p className="text-sm font-semibold text-white">Interview Pace</p>
+            </div>
+
+            {/* Slider */}
+            <div className="space-y-2">
+              <input
+                type="range"
+                min={0}
+                max={2}
+                step={1}
+                value={paceIndex}
+                onChange={(e) => setPaceIndex(parseInt(e.target.value))}
+                className="w-full h-2 rounded-full appearance-none cursor-pointer"
+                style={{ accentColor: "#9333ea" }}
+              />
+              <div className="flex justify-between">
+                {PACE_OPTIONS.map((p, i) => (
+                  <span
+                    key={p.key}
+                    className={`text-xs font-medium transition ${
+                      paceIndex === i ? "text-purple-400" : "text-slate-500"
+                    }`}
+                  >
+                    {p.emoji} {p.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Pace description */}
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
+              <p className="text-xs text-slate-400">{pace.desc}</p>
+            </div>
+
+            {/* Preview button */}
+            <button
+              onClick={handlePreviewPace}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition border ${
+                previewing
+                  ? "bg-purple-600 border-purple-600 text-white"
+                  : "border-white/10 bg-white/5 text-slate-400 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              <Play className="w-3.5 h-3.5" />
+              {previewing ? "Stop preview" : "Preview this pace"}
+            </button>
+          </div>
+        )}
+
+        {/* ── VOICE ONLY: Voice Picker ── */}
+        {interviewType === "VOICE" && availableVoices.length > 0 && (
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <Volume2 className="w-4 h-4 text-slate-400" />
+              <p className="text-sm font-semibold text-white">AI Voice</p>
+              <span className="text-[10px] text-slate-500 ml-auto">Click ▶ to preview</span>
+            </div>
+            <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+              {availableVoices.map((v) => (
+                <div
+                  key={v.name}
+                  onClick={() => setSelectedVoiceName(v.name)}
+                  className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition border cursor-pointer ${
+                    selectedVoiceName === v.name
+                      ? "bg-purple-600 border-purple-600 text-white"
+                      : "border-white/10 bg-white/[0.02] text-slate-400 hover:border-white/20 hover:text-white"
+                  }`}
+                >
+                  <span className="truncate flex-1">{v.name}</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handlePreviewVoice(v.name); }}
+                    className={`ml-3 p-1.5 rounded-lg shrink-0 transition ${
+                      selectedVoiceName === v.name
+                        ? "hover:bg-white/20 text-white"
+                        : "hover:bg-white/10 text-slate-500 hover:text-white"
+                    }`}
+                    title="Preview this voice"
+                  >
+                    <Play className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Tips */}
         {interviewType === "VOICE" && (
           <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 space-y-1.5">
@@ -247,8 +423,8 @@ function SetupScreen({
             {[
               "Find a quiet place with no background noise",
               "Speak clearly and at a normal pace",
-              "If you go silent for 3 seconds, the question will be repeated",
-              "After 8 more seconds of silence, the question will be skipped",
+              `Silence for ${pace.silenceRepeat / 1000}s → question repeated`,
+              `Silence for ${pace.silenceRepeat / 1000 + pace.silenceSkip / 1000}s total → question skipped`,
             ].map((tip) => (
               <p key={tip} className="text-xs text-slate-500 flex items-start gap-2">
                 <span className="text-purple-400 mt-0.5 shrink-0">•</span>
@@ -329,7 +505,7 @@ function VoiceCallScreen({
                 <div
                   key={i}
                   className="w-1 bg-purple-400 rounded-full animate-bounce"
-                  style={{ height: `${12 + Math.random() * 16}px`, animationDelay: `${i * 0.1}s` }}
+                  style={{ height: "14px", animationDelay: `${i * 0.1}s` }}
                 />
               ))}
             </div>
@@ -363,7 +539,6 @@ function VoiceCallScreen({
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] flex flex-col">
-
       {/* Header */}
       <div className="border-b border-white/5 bg-[#0a0a0f]/80 backdrop-blur-xl sticky top-0 z-10">
         <div className="max-w-2xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -372,9 +547,7 @@ function VoiceCallScreen({
             <p className="text-white font-semibold text-sm">{interview.jobTitle || "Interview"}</p>
           </div>
           <div className="text-right">
-            <p className="text-xs text-slate-500">
-              {answeredCount} / {interview.totalQuestions}
-            </p>
+            <p className="text-xs text-slate-500">{answeredCount} / {interview.totalQuestions}</p>
             <p className="text-white font-semibold text-sm">{progress}%</p>
           </div>
         </div>
@@ -388,26 +561,17 @@ function VoiceCallScreen({
 
       <div className="flex-1 flex flex-col items-center justify-center px-6 py-10 max-w-2xl mx-auto w-full space-y-8">
 
-        {/* Live joined banner */}
         {liveJoined && (
           <div className="w-full rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4 text-center">
-            <p className="text-sm font-semibold text-blue-400">
-              👤 Your interviewer has joined
-            </p>
-            <p className="text-xs text-slate-400 mt-1">
-              A human interviewer has taken over. Continue as normal.
-            </p>
+            <p className="text-sm font-semibold text-blue-400">👤 Your interviewer has joined</p>
+            <p className="text-xs text-slate-400 mt-1">A human interviewer has taken over. Continue as normal.</p>
           </div>
         )}
 
         {/* AI orb */}
         <div className="relative">
           <div className={`w-32 h-32 rounded-full flex items-center justify-center transition-all ${
-            isAISpeaking
-              ? "bg-purple-500/30"
-              : isListening
-              ? "bg-indigo-500/20"
-              : "bg-white/5"
+            isAISpeaking ? "bg-purple-500/30" : isListening ? "bg-indigo-500/20" : "bg-white/5"
           }`}>
             {isAISpeaking ? (
               <Volume2 className="w-12 h-12 text-purple-400" />
@@ -417,32 +581,22 @@ function VoiceCallScreen({
               <VolumeX className="w-12 h-12 text-slate-600" />
             )}
           </div>
-
-          {/* Pulse rings */}
           {(isAISpeaking || isListening) && (
             <>
-              <span className={`absolute inset-0 rounded-full border-2 animate-ping ${
-                isAISpeaking ? "border-purple-500/40" : "border-indigo-500/40"
-              }`} />
-              <span className={`absolute inset-[-12px] rounded-full border animate-ping ${
-                isAISpeaking ? "border-purple-500/20" : "border-indigo-500/20"
-              }`} style={{ animationDelay: "0.3s" }} />
+              <span className={`absolute inset-0 rounded-full border-2 animate-ping ${isAISpeaking ? "border-purple-500/40" : "border-indigo-500/40"}`} />
+              <span className={`absolute inset-[-12px] rounded-full border animate-ping ${isAISpeaking ? "border-purple-500/20" : "border-indigo-500/20"}`} style={{ animationDelay: "0.3s" }} />
             </>
           )}
         </div>
 
-        {/* Status label */}
+        {/* Status */}
         <div className="text-center space-y-1">
           {isAISpeaking && (
             <>
               <p className="text-purple-400 font-semibold text-sm">AI is speaking...</p>
               <div className="flex items-center justify-center gap-1">
                 {[0, 1, 2, 3, 4].map((i) => (
-                  <div
-                    key={i}
-                    className="w-1 bg-purple-400 rounded-full animate-bounce"
-                    style={{ height: "12px", animationDelay: `${i * 0.1}s` }}
-                  />
+                  <div key={i} className="w-1 bg-purple-400 rounded-full animate-bounce" style={{ height: "12px", animationDelay: `${i * 0.1}s` }} />
                 ))}
               </div>
             </>
@@ -451,14 +605,10 @@ function VoiceCallScreen({
             <>
               <p className="text-indigo-400 font-semibold text-sm">Listening...</p>
               {silencePhase === "warn" && (
-                <p className="text-amber-400 text-xs animate-pulse">
-                  Repeating question in a moment...
-                </p>
+                <p className="text-amber-400 text-xs animate-pulse">Repeating question...</p>
               )}
               {silencePhase === "skip" && (
-                <p className="text-red-400 text-xs animate-pulse">
-                  No response — skipping in 5 seconds...
-                </p>
+                <p className="text-red-400 text-xs animate-pulse">No response — skipping soon...</p>
               )}
             </>
           )}
@@ -467,28 +617,23 @@ function VoiceCallScreen({
           )}
         </div>
 
-        {/* Question text */}
+        {/* Question */}
         {question && (
           <div className="w-full rounded-2xl border border-white/10 bg-white/[0.02] p-6">
             <p className="text-xs text-slate-500 uppercase tracking-wider mb-3">
               Question {currentIndex + 1} of {interview.totalQuestions}
             </p>
-            <p className="text-white text-base font-medium leading-relaxed">
-              {question.question}
-            </p>
+            <p className="text-white text-base font-medium leading-relaxed">{question.question}</p>
           </div>
         )}
 
-        {/* Transcript */}
+        {/* Transcript + actions */}
         {transcript && !isAISpeaking && (
           <div className="w-full space-y-3">
             <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-5">
-              <p className="text-xs text-indigo-400 font-medium uppercase tracking-wider mb-2">
-                Your Answer
-              </p>
+              <p className="text-xs text-indigo-400 font-medium uppercase tracking-wider mb-2">Your Answer</p>
               <p className="text-white text-sm leading-relaxed">{transcript}</p>
             </div>
-
             <div className="flex gap-3">
               <button
                 onClick={onReRecord}
@@ -501,16 +646,13 @@ function VoiceCallScreen({
                 disabled={confirming}
                 className="flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold transition disabled:opacity-50"
               >
-                {confirming
-                  ? <><Loader2 className="w-4 h-4 animate-spin" />Submitting...</>
-                  : <><Send className="w-4 h-4" />Confirm Answer</>
-                }
+                {confirming ? <><Loader2 className="w-4 h-4 animate-spin" />Submitting...</> : <><Send className="w-4 h-4" />Confirm Answer</>}
               </button>
             </div>
           </div>
         )}
 
-        {/* Skip button */}
+        {/* Skip */}
         {isListening && !transcript && (
           <button
             onClick={onSkip}
@@ -520,19 +662,16 @@ function VoiceCallScreen({
           </button>
         )}
 
-        {/* Question overview pills */}
+        {/* Question progress dots */}
         <div className="flex flex-wrap gap-2 justify-center">
           {interview.questions.map((q: any, i: number) => (
             <div
               key={q.id}
               className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition ${
-                q.answered
-                  ? "bg-emerald-500/20 text-emerald-400"
-                  : q.skipped
-                  ? "bg-slate-500/20 text-slate-500"
-                  : i === currentIndex
-                  ? "bg-purple-500/20 text-purple-400 ring-2 ring-purple-500/40"
-                  : "bg-white/5 text-slate-600"
+                q.answered ? "bg-emerald-500/20 text-emerald-400"
+                : q.skipped ? "bg-slate-500/20 text-slate-500"
+                : i === currentIndex ? "bg-purple-500/20 text-purple-400 ring-2 ring-purple-500/40"
+                : "bg-white/5 text-slate-600"
               }`}
             >
               {q.answered ? "✓" : q.skipped ? "—" : i + 1}
@@ -544,31 +683,15 @@ function VoiceCallScreen({
   );
 }
 
-// ── Text Interview UI (existing style) ────────────────────────────────────────
+// ── Text Interview UI ──────────────────────────────────────────────────────────
 function TextInterviewScreen({
-  interview,
-  currentIndex,
-  answer,
-  setAnswer,
-  onSubmit,
-  submitting,
-  onNext,
-  justAnswered,
-  setCurrentIndex,
-  setJustAnswered,
-  phase,
+  interview, currentIndex, answer, setAnswer, onSubmit,
+  submitting, onNext, justAnswered, setCurrentIndex, setJustAnswered, phase,
 }: {
-  interview: any;
-  currentIndex: number;
-  answer: string;
-  setAnswer: (v: string) => void;
-  onSubmit: () => void;
-  submitting: boolean;
-  onNext: () => void;
-  justAnswered: boolean;
-  setCurrentIndex: (i: number) => void;
-  setJustAnswered: (v: boolean) => void;
-  phase: string;
+  interview: any; currentIndex: number; answer: string;
+  setAnswer: (v: string) => void; onSubmit: () => void; submitting: boolean;
+  onNext: () => void; justAnswered: boolean; setCurrentIndex: (i: number) => void;
+  setJustAnswered: (v: boolean) => void; phase: string;
 }) {
   const answeredCount = interview.questions.filter((q: any) => q.answered).length;
   const progress = Math.round((answeredCount / interview.totalQuestions) * 100);
@@ -590,14 +713,11 @@ function TextInterviewScreen({
           <div>
             <h2 className="text-2xl font-bold text-white mb-2">Interview Complete! 🎉</h2>
             <p className="text-slate-400 text-sm">
-              Thank you, {interview.candidateName.split(" ")[0]}. Your responses have been submitted.
-              The team will review them and be in touch soon.
+              Thank you, {interview.candidateName.split(" ")[0]}. The team will review your responses and be in touch soon.
             </p>
           </div>
           <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
-            <p className="text-sm text-emerald-400 font-medium">
-              {answeredCount} of {interview.totalQuestions} questions answered
-            </p>
+            <p className="text-sm text-emerald-400 font-medium">{answeredCount} of {interview.totalQuestions} questions answered</p>
           </div>
         </div>
       </div>
@@ -618,10 +738,7 @@ function TextInterviewScreen({
           </div>
         </div>
         <div className="h-1 bg-white/5">
-          <div
-            className="h-1 bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-500"
-            style={{ width: `${progress}%` }}
-          />
+          <div className="h-1 bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-500" style={{ width: `${progress}%` }} />
         </div>
       </div>
 
@@ -630,12 +747,8 @@ function TextInterviewScreen({
           <div className="w-16 h-16 rounded-2xl bg-purple-500/20 flex items-center justify-center mx-auto mb-4">
             <MessageSquare className="w-8 h-8 text-purple-400" />
           </div>
-          <h1 className="text-2xl font-bold text-white mb-2">
-            Hi, {interview.candidateName.split(" ")[0]}!
-          </h1>
-          <p className="text-slate-400 text-sm max-w-md mx-auto">
-            Answer each question thoughtfully. Take your time — there's no timer.
-          </p>
+          <h1 className="text-2xl font-bold text-white mb-2">Hi, {interview.candidateName.split(" ")[0]}!</h1>
+          <p className="text-slate-400 text-sm max-w-md mx-auto">Answer each question thoughtfully. Take your time — there's no timer.</p>
         </div>
 
         {currentQuestion && !currentQuestion.answered && (
@@ -644,13 +757,9 @@ function TextInterviewScreen({
               <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
                 {questionTypeLabels[currentQuestion.questionType] || currentQuestion.questionType}
               </span>
-              <span className="text-xs text-slate-600">
-                Question {currentIndex + 1} of {interview.totalQuestions}
-              </span>
+              <span className="text-xs text-slate-600">Question {currentIndex + 1} of {interview.totalQuestions}</span>
             </div>
-            <p className="text-white text-lg font-medium leading-relaxed">
-              {currentQuestion.question}
-            </p>
+            <p className="text-white text-lg font-medium leading-relaxed">{currentQuestion.question}</p>
 
             {justAnswered ? (
               <div className="space-y-4">
@@ -659,10 +768,7 @@ function TextInterviewScreen({
                   <p className="text-emerald-400 font-semibold">Answer received!</p>
                   <p className="text-slate-400 text-sm mt-1">Moving to the next question.</p>
                 </div>
-                <button
-                  onClick={onNext}
-                  className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-purple-600 text-white font-semibold hover:bg-purple-500 transition"
-                >
+                <button onClick={onNext} className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-purple-600 text-white font-semibold hover:bg-purple-500 transition">
                   Next Question <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
@@ -680,10 +786,7 @@ function TextInterviewScreen({
                   disabled={submitting || !answer.trim()}
                   className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-purple-600 text-white font-semibold hover:bg-purple-500 transition disabled:opacity-50"
                 >
-                  {submitting
-                    ? <><Loader2 className="w-4 h-4 animate-spin" />Submitting...</>
-                    : <><Send className="w-4 h-4" />Submit Answer</>
-                  }
+                  {submitting ? <><Loader2 className="w-4 h-4 animate-spin" />Submitting...</> : <><Send className="w-4 h-4" />Submit Answer</>}
                 </button>
               </div>
             )}
@@ -698,11 +801,9 @@ function TextInterviewScreen({
                 key={q.id}
                 onClick={() => { if (!q.answered) { setCurrentIndex(i); setJustAnswered(false); } }}
                 className={`flex items-center gap-3 p-3 rounded-xl transition cursor-pointer ${
-                  i === currentIndex && !q.answered
-                    ? "bg-purple-500/10 border border-purple-500/20"
-                    : q.answered
-                    ? "bg-emerald-500/5 border border-emerald-500/10"
-                    : "bg-white/[0.02] border border-white/5 hover:bg-white/5"
+                  i === currentIndex && !q.answered ? "bg-purple-500/10 border border-purple-500/20"
+                  : q.answered ? "bg-emerald-500/5 border border-emerald-500/10"
+                  : "bg-white/[0.02] border border-white/5 hover:bg-white/5"
                 }`}
               >
                 <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${
@@ -731,15 +832,16 @@ function InterviewSession() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Setup screen
   const [setupDone, setSetupDone] = useState(false);
   const [gender, setGender] = useState<"male" | "female" | "prefer-not-to-say">("prefer-not-to-say");
+  const [speechRate, setSpeechRate] = useState(0.92);
+  const [silenceRepeatMs, setSilenceRepeatMs] = useState(3000);
+  const [silenceSkipMs, setSilenceSkipMs] = useState(5000);
+  const [selectedVoiceName, setSelectedVoiceName] = useState<string | null>(null);
 
-  // Interview flow
   const [phase, setPhase] = useState<"opening" | "interview" | "closing" | "complete">("opening");
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Voice mode state
   const [isAISpeaking, setIsAISpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -747,90 +849,81 @@ function InterviewSession() {
   const [confirming, setConfirming] = useState(false);
   const [liveJoined, setLiveJoined] = useState(false);
 
-  // Text mode state
   const [textAnswer, setTextAnswer] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [justAnswered, setJustAnswered] = useState(false);
 
-  // Recording
+  // Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const audioStreamRef = useRef<MediaStream | null>(null);
-
-  // Speech recognition
   const recognitionRef = useRef<any>(null);
-
-  // Silence detection
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const repeatTimerRef = useRef<NodeJS.Timeout | null>(null);
   const silenceStartRef = useRef<number | null>(null);
-
-  // Poll for live takeover
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
+  // ── CRITICAL: prevents repeat loop ──
+  const isRepeatingRef = useRef(false);
+
+  // Stable refs for callbacks
+  const speechRateRef = useRef(speechRate);
+  const selectedVoiceNameRef = useRef(selectedVoiceName);
+  const genderRef = useRef(gender);
+  const silenceRepeatMsRef = useRef(silenceRepeatMs);
+  const silenceSkipMsRef = useRef(silenceSkipMs);
+  const interviewRef = useRef<any>(null);
+  const currentIndexRef = useRef(currentIndex);
+
+  useEffect(() => { speechRateRef.current = speechRate; }, [speechRate]);
+  useEffect(() => { selectedVoiceNameRef.current = selectedVoiceName; }, [selectedVoiceName]);
+  useEffect(() => { genderRef.current = gender; }, [gender]);
+  useEffect(() => { silenceRepeatMsRef.current = silenceRepeatMs; }, [silenceRepeatMs]);
+  useEffect(() => { silenceSkipMsRef.current = silenceSkipMs; }, [silenceSkipMs]);
+  useEffect(() => { interviewRef.current = interview; }, [interview]);
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+
   // ── Load interview ──
-  const loadInterview = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/interview-session/${token}`);
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || "Interview not found"); return; }
-      setInterview(data.interview);
-      const firstUnanswered = data.interview.questions.findIndex((q: any) => !q.answered && !q.skipped);
-      setCurrentIndex(firstUnanswered === -1 ? 0 : firstUnanswered);
-
-      // Detect live takeover
-      if (data.interview.isLive && !liveJoined) {
-        setLiveJoined(true);
-        if (data.interview.liveMessage) {
-          stopListening();
-          speakText(`Your interviewer has joined. ${data.interview.liveMessage}`, () => {});
-        }
-      }
-    } catch {
-      setError("Failed to load interview. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }, [token, liveJoined]);
-
-  useEffect(() => { loadInterview(); }, []);
-
-  // Poll every 3s for live takeover (only during ASYNC interview)
   useEffect(() => {
-    if (!setupDone || !interview) return;
-    if (interview.mode !== "ASYNC") return;
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/interview-session/${token}`);
+        const data = await res.json();
+        if (!res.ok) { setError(data.error || "Interview not found"); return; }
+        setInterview(data.interview);
+        interviewRef.current = data.interview;
+        const first = data.interview.questions.findIndex((q: any) => !q.answered && !q.skipped);
+        setCurrentIndex(first === -1 ? 0 : first);
+        currentIndexRef.current = first === -1 ? 0 : first;
+      } catch {
+        setError("Failed to load interview. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [token]);
 
+  // ── Poll for live takeover ──
+  useEffect(() => {
+    if (!setupDone || !interview || interview.mode !== "ASYNC") return;
     pollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/interview-session/${token}`);
         const data = await res.json();
         if (!res.ok) return;
-
-        // Detect live takeover
         if (data.interview.isLive && !liveJoined) {
           setLiveJoined(true);
           stopListening();
           const msg = data.interview.liveMessage
             ? `Your interviewer has joined. ${data.interview.liveMessage}`
             : "Your interviewer has joined and will continue the interview.";
-          speakText(msg, () => {});
-        }
-
-        // New live message from recruiter
-        if (data.interview.liveMessage !== interview.liveMessage) {
-          setInterview((prev: any) => ({ ...prev, liveMessage: data.interview.liveMessage }));
-          if (data.interview.liveMessage) {
-            stopListening();
-            speakText(data.interview.liveMessage, () => {
-              if (!data.interview.isLive) startListeningForAnswer();
-            });
-          }
+          doSpeak(msg, () => {});
         }
       } catch {}
     }, POLL_INTERVAL_MS);
-
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [setupDone, interview, token, liveJoined]);
 
@@ -841,9 +934,7 @@ function InterviewSession() {
       audioStreamRef.current = stream;
       const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
       recordingChunksRef.current = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) recordingChunksRef.current.push(e.data);
-      };
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) recordingChunksRef.current.push(e.data); };
       recorder.start(1000);
       mediaRecorderRef.current = recorder;
     } catch (err) {
@@ -864,65 +955,105 @@ function InterviewSession() {
             headers: { "x-share-token": token },
             body: formData,
           });
-        } catch (err) {
-          console.warn("Failed to upload recording:", err);
-        } finally {
-          audioStreamRef.current?.getTracks().forEach((t) => t.stop());
-          resolve();
-        }
+        } catch (err) { console.warn("Failed to upload recording:", err); }
+        finally { audioStreamRef.current?.getTracks().forEach((t) => t.stop()); resolve(); }
       };
       mediaRecorderRef.current!.stop();
     });
   };
 
-  // ── Speech synthesis helper ──
-  const speakText = useCallback((text: string, onEnd: () => void) => {
+  // ── Speech synthesis ──
+  const doSpeak = useCallback((text: string, onEnd: () => void) => {
     setIsAISpeaking(true);
-    speak(text, gender, () => {
+    speakWith(text, selectedVoiceNameRef.current, genderRef.current, speechRateRef.current, () => {
       setIsAISpeaking(false);
       onEnd();
     });
-  }, [gender]);
+  }, []);
 
-  // ── Silence detection ──
-  const startSilenceDetection = useCallback((stream: MediaStream, onSilence3s: () => void, onSilence8s: () => void) => {
+  // ── Stop silence detection ──
+  const stopSilenceDetection = useCallback(() => {
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    if (repeatTimerRef.current) { clearTimeout(repeatTimerRef.current); repeatTimerRef.current = null; }
+    audioContextRef.current?.close().catch(() => {});
+    audioContextRef.current = null;
+    analyserRef.current = null;
+    silenceStartRef.current = null;
+    isRepeatingRef.current = false;
+    setSilencePhase("none");
+  }, []);
+
+  // ── Stop listening ──
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    stopSilenceDetection();
+    setIsListening(false);
+  }, [stopSilenceDetection]);
+
+  // ── Start silence detection — uses shared mic stream ──
+  const startSilenceDetection = useCallback((stream: MediaStream) => {
     try {
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      const ctx = new AudioContext();
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioCtx();
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
-      const source = ctx.createMediaStreamSource(stream);
-      source.connect(analyser);
+      ctx.createMediaStreamSource(stream).connect(analyser);
       audioContextRef.current = ctx;
       analyserRef.current = analyser;
-
       silenceStartRef.current = null;
+      isRepeatingRef.current = false;
       setSilencePhase("none");
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
       const check = () => {
-        if (!analyserRef.current) return;
+        // ── CRITICAL: bail if repeating or stopped ──
+        if (isRepeatingRef.current || !analyserRef.current) return;
+
         analyserRef.current.getByteFrequencyData(dataArray);
         const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
 
         if (avg < SILENCE_THRESHOLD) {
           if (!silenceStartRef.current) silenceStartRef.current = Date.now();
           const elapsed = Date.now() - silenceStartRef.current;
+          const repeatMs = silenceRepeatMsRef.current;
+          const skipMs = silenceSkipMsRef.current;
 
-          if (elapsed >= SILENCE_REPEAT_MS + SILENCE_SKIP_MS) {
-            // 8s total silence → skip
-            setSilencePhase("skip");
-            onSilence8s();
-            return; // stop loop
-          } else if (elapsed >= SILENCE_REPEAT_MS) {
-            setSilencePhase("skip");
-            onSilence3s(); // already fired, now counting skip
-          } else if (elapsed >= 1000) {
-            // approaching 3s
+          if (elapsed >= repeatMs + skipMs) {
+            // Total silence exceeded → skip
+            if (!isRepeatingRef.current) {
+              isRepeatingRef.current = true;
+              handleSkipQuestion();
+            }
+            return;
+          } else if (elapsed >= repeatMs) {
+            // 3s (or custom) silence → repeat question once
+            if (!isRepeatingRef.current) {
+              isRepeatingRef.current = true;
+              silenceStartRef.current = null;
+              setSilencePhase("warn");
+              stopListening();
+
+              const q = interviewRef.current?.questions[currentIndexRef.current];
+              if (!q) return;
+
+              doSpeak(
+                `Let me repeat that. ${q.question}. I'll move to the next question if I don't receive a response.`,
+                () => {
+                  // After repeat: wait skipMs then auto-skip
+                  repeatTimerRef.current = setTimeout(() => {
+                    handleSkipQuestion();
+                  }, skipMs);
+                  // Restart listening
+                  isRepeatingRef.current = false;
+                  startListeningForAnswer();
+                }
+              );
+            }
+            return; // stop the loop — will resume in startListeningForAnswer
           }
         } else {
-          // Sound detected — reset
           silenceStartRef.current = null;
           setSilencePhase("none");
         }
@@ -934,31 +1065,14 @@ function InterviewSession() {
     } catch (err) {
       console.warn("Silence detection not available:", err);
     }
-  }, []);
+  }, [doSpeak, stopListening]);
 
-  const stopSilenceDetection = useCallback(() => {
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    if (repeatTimerRef.current) clearTimeout(repeatTimerRef.current);
-    audioContextRef.current?.close().catch(() => {});
-    audioContextRef.current = null;
-    analyserRef.current = null;
-    silenceStartRef.current = null;
-    setSilencePhase("none");
-  }, []);
-
-  // ── Speech recognition ──
-  const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-    recognitionRef.current = null;
-    stopSilenceDetection();
-    setIsListening(false);
-  }, [stopSilenceDetection]);
-
+  // ── Start listening — reuses existing mic stream for silence detection ──
   const startListeningForAnswer = useCallback(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
 
-    const recognition = new SpeechRecognition();
+    const recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = false;
     recognition.lang = "en-US";
@@ -972,85 +1086,116 @@ function InterviewSession() {
         }
       }
       setTranscript(finalTranscript.trim());
-      // Reset silence on speech
+      // Any speech resets silence timer
       silenceStartRef.current = null;
       setSilencePhase("none");
     };
 
-    recognition.onerror = () => { setIsListening(false); };
-    recognition.onend = () => { setIsListening(false); };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
 
     recognitionRef.current = recognition;
     recognition.start();
     setIsListening(true);
     setTranscript("");
 
-    // Start silence detection using mic stream
-    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
-      startSilenceDetection(
-        stream,
-        // 3s silence → repeat question
-        () => {
-          const q = interview?.questions[currentIndex];
-          if (!q) return;
-          setSilencePhase("warn");
-          stopListening();
-          speakText(
-            `Let me repeat that. ${q.question}. I'll move to the next question in 5 seconds if I don't receive a response.`,
-            () => {
-              // Start 5s countdown then skip
-              repeatTimerRef.current = setTimeout(() => {
-                handleSkipQuestion();
-              }, SILENCE_SKIP_MS);
-              startListeningForAnswer();
-            }
-          );
-        },
-        // 8s total silence → skip
-        () => {
-          handleSkipQuestion();
-        }
-      );
-      stream.getTracks().forEach((t) => t.stop()); // close this stream, recorder has the real one
-    }).catch(() => {});
-  }, [interview, currentIndex, speakText, stopListening, startSilenceDetection]);
+    // ── Use existing mic stream for silence detection (no second getUserMedia) ──
+    if (audioStreamRef.current && audioStreamRef.current.active) {
+      startSilenceDetection(audioStreamRef.current);
+    } else {
+      // Fallback if stream not available (TEXT interviews, etc.)
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then((stream) => { startSilenceDetection(stream); })
+        .catch(() => {});
+    }
+  }, [startSilenceDetection]);
 
   // ── Submit answer ──
-  const submitAnswer = useCallback(async (questionId: string, answer: string, mode: "voice" | "text") => {
+  const submitAnswer = useCallback(async (questionId: string, answer: string) => {
+    const iv = interviewRef.current;
+    const idx = currentIndexRef.current;
     try {
-      const res = await fetch(`/api/recruiter/interviews/${interview.id}/answer`, {
+      const res = await fetch(`/api/recruiter/interviews/${iv.id}/answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ questionId, answer, shareToken: token }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-
       setInterview((prev: any) => ({
         ...prev,
         answeredQuestions: prev.answeredQuestions + 1,
         questions: prev.questions.map((q: any, i: number) =>
-          i === currentIndex ? { ...q, answered: true } : q
+          i === idx ? { ...q, answered: true } : q
         ),
       }));
-
       return true;
-    } catch {
-      return false;
+    } catch { return false; }
+  }, [token]);
+
+  // ── Proceed to next ──
+  const proceedToNext = useCallback(() => {
+    const iv = interviewRef.current;
+    const idx = currentIndexRef.current;
+    if (!iv) return;
+
+    const nextIndex = iv.questions.findIndex(
+      (q: any, i: number) => i > idx && !q.answered && !q.skipped
+    );
+
+    if (nextIndex === -1) {
+      endInterview();
+    } else {
+      setCurrentIndex(nextIndex);
+      currentIndexRef.current = nextIndex;
+      setTranscript("");
+
+      if (iv.interviewType === "VOICE") {
+        const nextQ = iv.questions[nextIndex];
+        const instruction = iv.instructions?.find(
+          (ins: any) =>
+            (ins.trigger === "before_question" && ins.questionIndex === nextIndex) ||
+            (ins.trigger === "question_type" && ins.questionType === nextQ.questionType)
+        );
+        const toSpeak = instruction ? `${instruction.message} ${nextQ.question}` : nextQ.question;
+        setTimeout(() => {
+          doSpeak(toSpeak, () => { startListeningForAnswer(); });
+        }, 500);
+      }
     }
-  }, [interview, token, currentIndex]);
+  }, [doSpeak, startListeningForAnswer]);
+
+  // ── End interview ──
+  const endInterview = useCallback(async () => {
+    stopListening();
+    setPhase("closing");
+    const iv = interviewRef.current;
+    const closingMsg = iv?.closing?.message
+      || `That's all for today, ${iv?.candidateName?.split(" ")[0] || ""}. Thank you for your time. The team will review your responses and be in touch soon. Good luck!`;
+
+    if (iv?.interviewType === "VOICE") {
+      doSpeak(closingMsg, async () => {
+        await stopAndUploadRecording(iv.id);
+        setPhase("complete");
+      });
+    } else {
+      await stopAndUploadRecording(iv?.id);
+      setPhase("complete");
+    }
+  }, [stopListening, doSpeak]);
 
   // ── Skip question ──
   const handleSkipQuestion = useCallback(async () => {
     stopListening();
-    if (repeatTimerRef.current) clearTimeout(repeatTimerRef.current);
+    if (repeatTimerRef.current) { clearTimeout(repeatTimerRef.current); repeatTimerRef.current = null; }
 
-    const q = interview?.questions[currentIndex];
+    const iv = interviewRef.current;
+    const idx = currentIndexRef.current;
+    const q = iv?.questions[idx];
     if (!q) return;
 
-    // Mark as skipped in DB via answer API with empty answer
     try {
-      await fetch(`/api/recruiter/interviews/${interview.id}/answer`, {
+      await fetch(`/api/recruiter/interviews/${iv.id}/answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1065,150 +1210,101 @@ function InterviewSession() {
     setInterview((prev: any) => ({
       ...prev,
       questions: prev.questions.map((q: any, i: number) =>
-        i === currentIndex ? { ...q, skipped: true } : q
+        i === idx ? { ...q, skipped: true } : q
       ),
     }));
 
     proceedToNext();
-  }, [interview, currentIndex, token, stopListening]);
+  }, [stopListening, token, proceedToNext]);
 
-  // ── Proceed to next question or close ──
-  const proceedToNext = useCallback(() => {
-    if (!interview) return;
-
-    const nextIndex = interview.questions.findIndex(
-      (q: any, i: number) => i > currentIndex && !q.answered && !q.skipped
-    );
-
-    if (nextIndex === -1) {
-      // All done
-      endInterview();
-    } else {
-      setCurrentIndex(nextIndex);
-      setTranscript("");
-
-      if (interview.interviewType === "VOICE") {
-        const nextQ = interview.questions[nextIndex];
-        // Check for mid-interview instruction
-        const instruction = interview.instructions?.find(
-          (ins: any) =>
-            (ins.trigger === "before_question" && ins.questionIndex === nextIndex) ||
-            (ins.trigger === "question_type" && ins.questionType === nextQ.questionType)
-        );
-
-        const toSpeak = instruction
-          ? `${instruction.message} ${nextQ.question}`
-          : nextQ.question;
-
-        setTimeout(() => {
-          speakText(toSpeak, () => { startListeningForAnswer(); });
-        }, 500);
-      }
-    }
-  }, [interview, currentIndex, speakText, startListeningForAnswer]);
-
-  // ── End interview ──
-  const endInterview = useCallback(async () => {
-    stopListening();
-    setPhase("closing");
-
-    const closingMsg = interview?.closing?.message
-      || `That's all for today, ${interview?.candidateName?.split(" ")[0] || ""}. Thank you for your time. The team will review your responses and be in touch soon. Good luck!`;
-
-    if (interview?.interviewType === "VOICE") {
-      speakText(closingMsg, async () => {
-        await stopAndUploadRecording(interview.id);
-        setPhase("complete");
-      });
-    } else {
-      await stopAndUploadRecording(interview?.id);
-      setPhase("complete");
-    }
-  }, [interview, stopListening, speakText]);
-
-  // ── Voice mode: confirm answer ──
+  // ── Voice confirm ──
   const handleVoiceConfirm = useCallback(async () => {
     if (!transcript.trim()) return;
     setConfirming(true);
     stopListening();
-
-    const q = interview.questions[currentIndex];
-    const ok = await submitAnswer(q.id, transcript, "voice");
-
+    const q = interviewRef.current?.questions[currentIndexRef.current];
+    const ok = await submitAnswer(q.id, transcript);
     setConfirming(false);
     setTranscript("");
-
     if (ok) proceedToNext();
-  }, [transcript, interview, currentIndex, submitAnswer, stopListening, proceedToNext]);
+  }, [transcript, submitAnswer, stopListening, proceedToNext]);
 
-  // ── Voice mode: re-record ──
+  // ── Voice re-record ──
   const handleVoiceReRecord = useCallback(() => {
     setTranscript("");
-    speakText(interview.questions[currentIndex].question, () => {
-      startListeningForAnswer();
-    });
-  }, [interview, currentIndex, speakText, startListeningForAnswer]);
+    const q = interviewRef.current?.questions[currentIndexRef.current];
+    doSpeak(q.question, () => { startListeningForAnswer(); });
+  }, [doSpeak, startListeningForAnswer]);
 
-  // ── Text mode: submit ──
+  // ── Text submit ──
   const handleTextSubmit = useCallback(async () => {
     if (!textAnswer.trim()) return;
     setSubmitting(true);
-    const q = interview.questions[currentIndex];
-    const ok = await submitAnswer(q.id, textAnswer, "text");
+    const q = interviewRef.current?.questions[currentIndexRef.current];
+    const ok = await submitAnswer(q.id, textAnswer);
     setSubmitting(false);
-    if (ok) {
-      setTextAnswer("");
-      setJustAnswered(true);
-    }
-  }, [textAnswer, interview, currentIndex, submitAnswer]);
+    if (ok) { setTextAnswer(""); setJustAnswered(true); }
+  }, [textAnswer, submitAnswer]);
 
   const handleTextNext = useCallback(() => {
     setJustAnswered(false);
-    const nextIndex = interview.questions.findIndex(
-      (q: any, i: number) => i > currentIndex && !q.answered
-    );
-    if (nextIndex !== -1) {
-      setCurrentIndex(nextIndex);
-    } else {
-      endInterview();
-    }
-  }, [interview, currentIndex, endInterview]);
+    const iv = interviewRef.current;
+    const idx = currentIndexRef.current;
+    const nextIndex = iv.questions.findIndex((q: any, i: number) => i > idx && !q.answered);
+    if (nextIndex !== -1) { setCurrentIndex(nextIndex); currentIndexRef.current = nextIndex; }
+    else endInterview();
+  }, [endInterview]);
 
-  // ── Start interview after setup ──
+  // ── Setup complete ──
   const handleSetupComplete = useCallback(async (
     selectedGender: "male" | "female" | "prefer-not-to-say",
-    dob: string
+    dob: string,
+    paceIndex: number,
+    voiceName: string | null
   ) => {
+    const pace = PACE_OPTIONS[paceIndex];
     setGender(selectedGender);
+    genderRef.current = selectedGender;
+    setSpeechRate(pace.speechRate);
+    speechRateRef.current = pace.speechRate;
+    setSilenceRepeatMs(pace.silenceRepeat);
+    silenceRepeatMsRef.current = pace.silenceRepeat;
+    setSilenceSkipMs(pace.silenceSkip);
+    silenceSkipMsRef.current = pace.silenceSkip;
+    setSelectedVoiceName(voiceName);
+    selectedVoiceNameRef.current = voiceName;
     setSetupDone(true);
 
-    // Start recording
-    if (interview?.interviewType === "VOICE") {
+    const iv = interviewRef.current;
+
+    if (iv?.interviewType === "VOICE") {
       await startRecording();
     }
 
     setPhase("opening");
 
-    const openingMsg = interview?.opening?.message
-      || `Hi ${interview?.candidateName?.split(" ")[0] || ""}! Welcome to your interview${interview?.jobTitle ? ` for the ${interview.jobTitle} position` : ""}. I'm your AI interviewer today. Take your time, speak clearly, and answer as fully as you can. Let's begin.`;
+    const openingMsg = iv?.opening?.message
+      || `Hi ${iv?.candidateName?.split(" ")[0] || ""}! Welcome to your interview${iv?.jobTitle ? ` for the ${iv.jobTitle} position` : ""}. I'm your AI interviewer today. Take your time, speak clearly, and answer as fully as you can. Let's begin.`;
 
-    if (interview?.interviewType === "VOICE") {
-      // Wait for voices to load
+    if (iv?.interviewType === "VOICE") {
       const startSpeaking = () => {
-        speakText(openingMsg, () => {
+        speakWith(openingMsg, voiceName, selectedGender, pace.speechRate, () => {
+          setIsAISpeaking(false);
           setPhase("interview");
-          const firstQ = interview.questions[0];
+          const firstQ = iv.questions[0];
           if (firstQ) {
             setTimeout(() => {
-              speakText(firstQ.question, () => {
+              setIsAISpeaking(true);
+              speakWith(firstQ.question, voiceName, selectedGender, pace.speechRate, () => {
+                setIsAISpeaking(false);
                 startListeningForAnswer();
               });
             }, 800);
           }
         });
+        setIsAISpeaking(true);
       };
 
-      // Chrome needs voices to load
       if (window.speechSynthesis.getVoices().length > 0) {
         startSpeaking();
       } else {
@@ -1220,9 +1316,8 @@ function InterviewSession() {
     } else {
       setPhase("interview");
     }
-  }, [interview, speakText, startListeningForAnswer]);
+  }, [startListeningForAnswer]);
 
-  // ── Error / loading states ──
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
@@ -1245,7 +1340,6 @@ function InterviewSession() {
 
   if (!interview) return null;
 
-  // ── Setup screen ──
   if (!setupDone) {
     return (
       <SetupScreen
@@ -1258,7 +1352,6 @@ function InterviewSession() {
     );
   }
 
-  // ── Voice interview ──
   if (interview.interviewType === "VOICE") {
     return (
       <VoiceCallScreen
@@ -1278,7 +1371,6 @@ function InterviewSession() {
     );
   }
 
-  // ── Text interview ──
   return (
     <TextInterviewScreen
       interview={interview}
@@ -1289,7 +1381,7 @@ function InterviewSession() {
       submitting={submitting}
       onNext={handleTextNext}
       justAnswered={justAnswered}
-      setCurrentIndex={setCurrentIndex}
+      setCurrentIndex={(i) => { setCurrentIndex(i); currentIndexRef.current = i; }}
       setJustAnswered={setJustAnswered}
       phase={phase}
     />
