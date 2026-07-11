@@ -480,6 +480,12 @@ enum InterviewMode {
   LIVE
 }
 
+enum InterviewType {
+  TEXT
+  VOICE
+  VIDEO
+}
+
 enum QuestionType {
   CV_VERIFICATION
   LOCATION_BASED
@@ -500,6 +506,7 @@ model RecruiterInterview {
   jobId                 String?
   job                   JobPosting?       @relation(fields: [jobId], references: [id], onDelete: SetNull)
 
+  interviewType         InterviewType     @default(TEXT)
   mode                  InterviewMode     @default(ASYNC)
   status                InterviewStatus   @default(PENDING)
 

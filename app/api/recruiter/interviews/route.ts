@@ -10,14 +10,10 @@ const interviewAllowed = [
   "RECRUITER_CUSTOM", "ADMIN",
 ];
 
-// ── GET — List all interviews ──────────────────────────────────────────────────
-
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const userId = (session.user as any).id as string;
     const { searchParams } = new URL(req.url);
@@ -25,9 +21,7 @@ export async function GET(req: NextRequest) {
     const candidateId = searchParams.get("candidateId") || undefined;
 
     const profile = await prisma.recruiterProfile.findUnique({ where: { userId } });
-    if (!profile) {
-      return NextResponse.json({ error: "Recruiter profile not found" }, { status: 404 });
-    }
+    if (!profile) return NextResponse.json({ error: "Recruiter profile not found" }, { status: 404 });
 
     const interviews = await prisma.recruiterInterview.findMany({
       where: {
@@ -50,14 +44,10 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ── POST — Create interview + generate questions ───────────────────────────────
-
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const userId = (session.user as any).id as string;
     const role = (session.user as any).role as string;
@@ -70,26 +60,15 @@ export async function POST(req: NextRequest) {
     }
 
     const profile = await prisma.recruiterProfile.findUnique({ where: { userId } });
-    if (!profile) {
-      return NextResponse.json({ error: "Recruiter profile not found" }, { status: 404 });
-    }
+    if (!profile) return NextResponse.json({ error: "Recruiter profile not found" }, { status: 404 });
 
-    const {
-      candidateId,
-      applicationId,
-      jobId,
-      mode,
-      scheduledAt,
-    } = await req.json();
+    const { candidateId, applicationId, jobId, mode, interviewType, scheduledAt } = await req.json();
 
     if (!candidateId && !applicationId) {
-      return NextResponse.json(
-        { error: "Either candidateId or applicationId is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Either candidateId or applicationId is required" }, { status: 400 });
     }
 
-    // ── Load candidate/application data ──
+    // ── Load candidate data ──
     let candidateName = "Candidate";
     let candidateEmail: string | null = null;
     let candidateLocation: string | null = null;
@@ -110,10 +89,7 @@ export async function POST(req: NextRequest) {
         where: { id: candidateId, recruiterId: profile.id },
         include: { job: { select: { id: true, title: true, description: true } } },
       });
-
-      if (!candidate) {
-        return NextResponse.json({ error: "Candidate not found" }, { status: 404 });
-      }
+      if (!candidate) return NextResponse.json({ error: "Candidate not found" }, { status: 404 });
 
       candidateName = candidate.candidateName || "Candidate";
       candidateEmail = candidate.candidateEmail || null;
@@ -141,10 +117,7 @@ export async function POST(req: NextRequest) {
         where: { id: applicationId, recruiterId: profile.id },
         include: { job: { select: { id: true, title: true, description: true } } },
       });
-
-      if (!application) {
-        return NextResponse.json({ error: "Application not found" }, { status: 404 });
-      }
+      if (!application) return NextResponse.json({ error: "Application not found" }, { status: 404 });
 
       candidateName = application.candidateName || "Candidate";
       candidateEmail = application.candidateEmail || null;
@@ -167,18 +140,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Override jobTitle if jobId provided directly
     if (jobId && !jobTitle) {
-      const job = await prisma.jobPosting.findFirst({
-        where: { id: jobId, recruiterId: profile.id },
-      });
-      if (job) {
-        jobTitle = job.title;
-        jobDescription = job.description;
-      }
+      const job = await prisma.jobPosting.findFirst({ where: { id: jobId, recruiterId: profile.id } });
+      if (job) { jobTitle = job.title; jobDescription = job.description; }
     }
 
-    // ── Generate questions with AI ──
+    // ── Generate questions ──
     const generatedQuestions = await generateInterviewQuestions({
       candidateName,
       candidateLocation: candidateLocation || undefined,
@@ -192,7 +159,11 @@ export async function POST(req: NextRequest) {
       redFlags,
     });
 
-    // ── Create interview + questions in DB ──
+    // ── Validate interviewType ──
+    const validTypes = ["TEXT", "VOICE", "VIDEO"];
+    const resolvedType = validTypes.includes(interviewType) ? interviewType : "TEXT";
+
+    // ── Create interview ──
     const interview = await prisma.recruiterInterview.create({
       data: {
         recruiterId: profile.id,
@@ -200,6 +171,7 @@ export async function POST(req: NextRequest) {
         applicationId: resolvedApplicationId || null,
         jobId: resolvedJobId || null,
         mode: mode || "ASYNC",
+        interviewType: resolvedType,
         status: "PENDING",
         candidateName,
         candidateEmail,
@@ -216,17 +188,15 @@ export async function POST(req: NextRequest) {
           })),
         },
       },
-      include: {
-        questions: { orderBy: { order: "asc" } },
-      },
+      include: { questions: { orderBy: { order: "asc" } } },
     });
 
     await logActivity({
       recruiterId: profile.id,
       type: "CANDIDATE_STATUS_CHANGED",
       title: "Interview created",
-      description: `${mode || "ASYNC"} interview started for ${candidateName}`,
-      meta: { candidateName, jobTitle, mode, interviewId: interview.id },
+      description: `${resolvedType} ${mode || "ASYNC"} interview started for ${candidateName}`,
+      meta: { candidateName, jobTitle, mode, interviewType: resolvedType, interviewId: interview.id },
     });
 
     return NextResponse.json({ success: true, interview });
