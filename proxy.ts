@@ -87,6 +87,11 @@ if (pathname.startsWith("/jobs")) {
   }
 
   // ── Recruiter routes ───────────────────────────────────────────────────────
+  // Invite accept page is public — must be accessible without auth
+  if (pathname.startsWith("/recruiter/invite/accept")) {
+    return NextResponse.next();
+  }
+
   if (
     pathname.startsWith("/recruiter") &&
     !pathname.startsWith("/recruiter-pricing")

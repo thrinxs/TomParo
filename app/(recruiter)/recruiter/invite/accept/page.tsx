@@ -2,24 +2,23 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
-import { CheckCircle, XCircle, Loader2, Users, Shield } from "lucide-react";
+import {
+  CheckCircle, XCircle, Loader2, Users, Shield,
+  Building2, ArrowRight, Mail,
+} from "lucide-react";
 
 function AcceptInviteInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { data: session, status } = useSession();
   const token = searchParams.get("token");
 
-  const [inviteStatus, setInviteStatus] = useState<"loading" | "success" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [message, setMessage] = useState("");
-  const [companyName, setCompanyName] = useState("");
   const [inviteInfo, setInviteInfo] = useState<any>(null);
 
-  // ── Step 1: Load invite info (public — no auth needed) ──
   useEffect(() => {
     if (!token) {
-      setInviteStatus("error");
+      setStatus("error");
       setMessage("Invalid invite link — no token found.");
       return;
     }
@@ -29,14 +28,14 @@ function AcceptInviteInner() {
         const res = await fetch(`/api/recruiter/team/invite?token=${token}`);
         const data = await res.json();
         if (!res.ok) {
-          setInviteStatus("error");
+          setStatus("error");
           setMessage(data.error || "Invalid invite link");
           return;
         }
         setInviteInfo(data);
-        setCompanyName(data.companyName);
+        setStatus("ready");
       } catch {
-        setInviteStatus("error");
+        setStatus("error");
         setMessage("Failed to load invite. Please try again.");
       }
     };
@@ -44,113 +43,154 @@ function AcceptInviteInner() {
     loadInvite();
   }, [token]);
 
-  // ── Step 2: Once invite info is loaded + session known, act ──
-  useEffect(() => {
-    if (!inviteInfo || status === "loading") return;
+  const handleCreateAccount = () => {
+    router.push(
+      `/signup?inviteToken=${token}&email=${encodeURIComponent(inviteInfo.email)}&company=${encodeURIComponent(inviteInfo.companyName)}`
+    );
+  };
 
-    // Not logged in → redirect to signup with invite context
-    if (status === "unauthenticated") {
-      router.push(`/signup?inviteToken=${token}&email=${encodeURIComponent(inviteInfo.email)}&company=${encodeURIComponent(inviteInfo.companyName)}`);
-      return;
-    }
-
-    // Logged in with wrong email
-    const sessionEmail = (session?.user as any)?.email;
-    if (sessionEmail !== inviteInfo.email) {
-      setInviteStatus("error");
-      setMessage(`This invite was sent to ${inviteInfo.email}. You are signed in as ${sessionEmail}.`);
-      return;
-    }
-
-    // Logged in with correct email → accept invite
-    const acceptInvite = async () => {
-      try {
-        const res = await fetch("/api/recruiter/team/invite/accept", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          setInviteStatus("error");
-          setMessage(data.error || "Failed to accept invite");
-        } else {
-          setInviteStatus("success");
-          setCompanyName(data.companyName);
-          setTimeout(() => router.push("/recruiter"), 3000);
-        }
-      } catch {
-        setInviteStatus("error");
-        setMessage("Something went wrong. Please try again.");
-      }
-    };
-
-    acceptInvite();
-  }, [inviteInfo, status, session, token, router]);
+  const handleSignIn = () => {
+    router.push(`/signin?callbackUrl=/recruiter/invite/accept?token=${token}`);
+  };
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center p-6">
-      <div className="max-w-md w-full rounded-3xl border border-white/10 bg-white/[0.02] p-10 text-center">
+      <div className="max-w-md w-full space-y-4">
 
-        {(inviteStatus === "loading" || status === "loading") && (
-          <>
+        {/* Loading */}
+        {status === "loading" && (
+          <div className="rounded-3xl border border-white/10 bg-white/[0.02] p-10 text-center">
             <Loader2 className="w-12 h-12 text-purple-400 animate-spin mx-auto mb-4" />
             <p className="text-white font-semibold text-lg">Loading your invite...</p>
-            {companyName && (
-              <p className="text-slate-400 text-sm mt-2">from {companyName}</p>
-            )}
-          </>
+          </div>
         )}
 
-        {inviteStatus === "success" && (
-          <>
-            <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto mb-4">
-              <CheckCircle className="w-8 h-8 text-emerald-400" />
-            </div>
-            <p className="text-white font-bold text-xl mb-2">You're in! 🎉</p>
-            <p className="text-slate-400">
-              You've joined{" "}
-              <span className="text-white font-semibold">{companyName}</span>'s
-              recruitment team.
-            </p>
-            <p className="text-slate-500 text-sm mt-3">
-              Redirecting to your dashboard...
-            </p>
-          </>
-        )}
-
-        {inviteStatus === "error" && (
-          <>
+        {/* Error */}
+        {status === "error" && (
+          <div className="rounded-3xl border border-white/10 bg-white/[0.02] p-10 text-center">
             <div className="w-16 h-16 rounded-2xl bg-red-500/10 flex items-center justify-center mx-auto mb-4">
               <XCircle className="w-8 h-8 text-red-400" />
             </div>
-            <p className="text-white font-bold text-xl mb-2">Invite Failed</p>
-            <p className="text-slate-400 mb-6">{message}</p>
+            <p className="text-white font-bold text-xl mb-2">Invalid Invite</p>
+            <p className="text-slate-400">{message}</p>
+          </div>
+        )}
 
-            {message.includes("signed in as") && (
-              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-left mb-6">
-                <p className="text-xs text-amber-400 font-semibold mb-1">Wrong account</p>
-                <p className="text-xs text-slate-400">
-                  Sign out and sign in with the correct email address, then click
-                  the invite link again.
-                </p>
+        {/* Ready — show invite details */}
+        {status === "ready" && inviteInfo && (
+          <>
+            {/* Header card */}
+            <div className="rounded-3xl border border-purple-500/20 bg-purple-500/5 p-8 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-purple-500/20 flex items-center justify-center mx-auto mb-4">
+                <Users className="w-8 h-8 text-purple-400" />
               </div>
-            )}
+              <p className="text-xs text-purple-400 font-semibold uppercase tracking-wider mb-2">
+                Team Invitation
+              </p>
+              <h1 className="text-2xl font-bold text-white mb-2">
+                You've been invited! 🎉
+              </h1>
+              <p className="text-slate-400 text-sm">
+                <span className="text-white font-semibold">
+                  {inviteInfo.companyName}
+                </span>{" "}
+                has invited you to join their recruitment team on TomParo
+              </p>
+            </div>
 
-            <div className="flex flex-col gap-3">
+            {/* Invite details */}
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 space-y-4">
+              <p className="text-xs font-semibold text-white uppercase tracking-wider">
+                Invite Details
+              </p>
+
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                <Building2 className="w-4 h-4 text-purple-400 shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-500">Company</p>
+                  <p className="text-sm font-semibold text-white">{inviteInfo.companyName}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                <Mail className="w-4 h-4 text-blue-400 shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-500">Invited Email</p>
+                  <p className="text-sm font-semibold text-white">{inviteInfo.email}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                <Users className="w-4 h-4 text-amber-400 shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-500">Role</p>
+                  <p className="text-sm font-semibold text-white capitalize">
+                    {inviteInfo.role.toLowerCase()} — Team Member
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-500">Expires</p>
+                  <p className="text-sm font-semibold text-white">
+                    {new Date(inviteInfo.expiresAt).toLocaleDateString("en-NG", {
+                      day: "numeric", month: "long", year: "numeric",
+                    })}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* What you can do */}
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 space-y-3">
+              <p className="text-xs font-semibold text-white uppercase tracking-wider">
+                As a team member you can:
+              </p>
+              {[
+                "Upload and analyse CVs",
+                "Manage job postings",
+                "Send emails to candidates",
+                "View the talent pool and pipeline",
+                "Access the analytics dashboard",
+              ].map((item) => (
+                <div key={item} className="flex items-center gap-2">
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <p className="text-sm text-slate-300">{item}</p>
+                </div>
+              ))}
+              <div className="pt-2 border-t border-white/5">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <p className="text-xs text-amber-400">
+                    Settings, billing, and team management are admin-only
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="space-y-3">
               <button
-                onClick={() => router.push(`/signup?inviteToken=${token}&email=${encodeURIComponent(inviteInfo?.email || "")}&company=${encodeURIComponent(companyName)}`)}
-                className="px-6 py-3 rounded-xl bg-purple-600 text-white text-sm font-semibold hover:bg-purple-500 transition"
+                onClick={handleCreateAccount}
+                className="w-full inline-flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-purple-600 text-white font-semibold hover:bg-purple-500 transition"
               >
-                Create account with correct email
+                Create Account & Join Team
+                <ArrowRight className="w-4 h-4" />
               </button>
               <button
-                onClick={() => router.push("/signin")}
-                className="px-6 py-3 rounded-xl border border-white/10 bg-white/5 text-white text-sm font-semibold hover:bg-white/10 transition"
+                onClick={handleSignIn}
+                className="w-full inline-flex items-center justify-center gap-2 px-6 py-4 rounded-xl border border-white/10 bg-white/5 text-white font-semibold hover:bg-white/10 transition"
               >
-                Sign in with correct account
+                Already have an account? Sign in
               </button>
             </div>
+
+            <p className="text-center text-xs text-slate-600">
+              You must sign up or sign in with{" "}
+              <span className="text-slate-400">{inviteInfo.email}</span>
+            </p>
           </>
         )}
 
