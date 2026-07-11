@@ -7,7 +7,7 @@ import { signIn } from "next-auth/react";
 import {
   User, Mail, Lock, Phone, ArrowRight, Loader2,
   Building2, Briefcase, Users, ChevronDown,
-  Eye, EyeOff,
+  Eye, EyeOff, Shield, CheckCircle,
 } from "lucide-react";
 
 function SignUpForm() {
@@ -16,13 +16,18 @@ function SignUpForm() {
 
   const typeParam = searchParams.get("type");
   const planParam = searchParams.get("plan");
+  const inviteToken = searchParams.get("inviteToken");
+  const inviteEmail = searchParams.get("email");
+  const inviteCompany = searchParams.get("company");
+
+  const isInviteFlow = !!inviteToken;
 
   const [accountType, setAccountType] = useState<"jobseeker" | "recruiter">(
     typeParam === "recruiter" ? "recruiter" : "jobseeker"
   );
 
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(inviteEmail || "");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -40,6 +45,11 @@ function SignUpForm() {
     if (typeParam === "recruiter") setAccountType("recruiter");
   }, [typeParam]);
 
+  // Pre-fill email from invite
+  useEffect(() => {
+    if (inviteEmail) setEmail(decodeURIComponent(inviteEmail));
+  }, [inviteEmail]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -52,7 +62,7 @@ function SignUpForm() {
       setError("Password must be at least 8 characters");
       return;
     }
-    if (accountType === "recruiter" && !companyName.trim()) {
+    if (!isInviteFlow && accountType === "recruiter" && !companyName.trim()) {
       setError("Company name is required");
       return;
     }
@@ -64,8 +74,12 @@ function SignUpForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name, email, phone, password, accountType,
-          ...(accountType === "recruiter" && {
+          name,
+          email,
+          phone,
+          password,
+          accountType: isInviteFlow ? "jobseeker" : accountType,
+          ...(!isInviteFlow && accountType === "recruiter" && {
             companyName, companySize, industry, plan: planParam,
           }),
         }),
@@ -89,6 +103,12 @@ function SignUpForm() {
         return;
       }
 
+      // Invite flow → go accept the invite
+      if (isInviteFlow) {
+        router.push(`/recruiter/invite/accept?token=${inviteToken}`);
+        return;
+      }
+
       if (accountType === "recruiter") {
         router.push("/recruiter-pricing");
       } else {
@@ -106,11 +126,15 @@ function SignUpForm() {
   const handleGoogleSignUp = async () => {
     setLoading(true);
     await signIn("google", {
-      callbackUrl: accountType === "recruiter" ? "/recruiter-pricing" : "/dashboard",
+      callbackUrl: isInviteFlow
+        ? `/recruiter/invite/accept?token=${inviteToken}`
+        : accountType === "recruiter"
+        ? "/recruiter-pricing"
+        : "/dashboard",
     });
   };
 
-  const isRecruiter = accountType === "recruiter";
+  const isRecruiter = !isInviteFlow && accountType === "recruiter";
 
   const inputClass = (recruiter: boolean) =>
     `w-full rounded-xl border border-white/10 bg-slate-900/50 px-11 py-3 text-white placeholder-slate-500 outline-none transition ${
@@ -125,36 +149,93 @@ function SignUpForm() {
       {/* Header */}
       <div className="mb-8 text-center">
         <h1 className="text-3xl font-semibold text-white sm:text-4xl">
-          Create your account
+          {isInviteFlow ? "Accept Your Invitation" : "Create your account"}
         </h1>
         <p className="mt-3 text-base text-slate-400">
-          {isRecruiter ? "Start hiring smarter with AI" : "Start optimizing your career today"}
+          {isInviteFlow
+            ? `You've been invited to join ${decodeURIComponent(inviteCompany || "a company")} on TomParo`
+            : isRecruiter
+            ? "Start hiring smarter with AI"
+            : "Start optimizing your career today"}
         </p>
       </div>
 
-      {/* Toggle */}
-      <div className="mb-6 flex rounded-2xl border border-white/10 bg-white/[0.03] p-1">
-        <button
-          type="button"
-          onClick={() => setAccountType("jobseeker")}
-          className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-all ${
-            !isRecruiter ? "bg-blue-600 text-white shadow-lg shadow-blue-700/25" : "text-slate-400 hover:text-white"
-          }`}
-        >
-          <Briefcase className="h-4 w-4" />
-          Job Seeker
-        </button>
-        <button
-          type="button"
-          onClick={() => setAccountType("recruiter")}
-          className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-all ${
-            isRecruiter ? "bg-purple-600 text-white shadow-lg shadow-purple-700/25" : "text-slate-400 hover:text-white"
-          }`}
-        >
-          <Building2 className="h-4 w-4" />
-          Recruiter
-        </button>
-      </div>
+      {/* Invite context banner */}
+      {isInviteFlow && (
+        <div className="mb-6 space-y-3">
+          <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center shrink-0">
+                <Users className="w-5 h-5 text-purple-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-white mb-1">
+                  Team Member Account
+                </p>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  You are creating an account under{" "}
+                  <span className="text-purple-400 font-semibold">
+                    {decodeURIComponent(inviteCompany || "this company")}
+                  </span>
+                  . This is a <span className="text-white font-semibold">staff account</span>,
+                  not an admin account — you will have access to the recruiter
+                  dashboard as a team member.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-2">
+            <p className="text-xs font-semibold text-white">What you can do:</p>
+            {[
+              "Upload and analyse CVs",
+              "Manage job postings",
+              "Send emails to candidates",
+              "View the talent pool and pipeline",
+              "Access the analytics dashboard",
+            ].map((item) => (
+              <div key={item} className="flex items-center gap-2">
+                <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <p className="text-xs text-slate-400">{item}</p>
+              </div>
+            ))}
+            <div className="pt-2 border-t border-white/5">
+              <div className="flex items-center gap-2">
+                <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <p className="text-xs text-amber-400">
+                  Settings, billing, and team management are admin-only
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Account type toggle — hidden on invite flow */}
+      {!isInviteFlow && (
+        <div className="mb-6 flex rounded-2xl border border-white/10 bg-white/[0.03] p-1">
+          <button
+            type="button"
+            onClick={() => setAccountType("jobseeker")}
+            className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-all ${
+              !isRecruiter ? "bg-blue-600 text-white shadow-lg shadow-blue-700/25" : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <Briefcase className="h-4 w-4" />
+            Job Seeker
+          </button>
+          <button
+            type="button"
+            onClick={() => setAccountType("recruiter")}
+            className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-all ${
+              isRecruiter ? "bg-purple-600 text-white shadow-lg shadow-purple-700/25" : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <Building2 className="h-4 w-4" />
+            Recruiter
+          </button>
+        </div>
+      )}
 
       {/* Plan badge */}
       {isRecruiter && planParam && (
@@ -199,29 +280,26 @@ function SignUpForm() {
             </div>
           </div>
 
-          {/* Company Name */}
+          {/* Recruiter fields — hidden on invite flow */}
           {isRecruiter && (
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-300">
-                Company Name
-              </label>
-              <div className="relative">
-                <Building2 className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
-                <input
-                  type="text"
-                  value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
-                  required={isRecruiter}
-                  className={inputClass(true)}
-                  placeholder="Acme Corp"
-                />
+            <div className="space-y-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-300">
+                  Company Name <span className="text-red-400">*</span>
+                </label>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
+                  <input
+                    type="text"
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    required
+                    className={inputClass(true)}
+                    placeholder="Acme Corp"
+                  />
+                </div>
               </div>
-            </div>
-          )}
 
-          {/* Company Size + Industry */}
-          {isRecruiter && (
-            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-300">
                   Company Size <span className="text-xs text-slate-500">(optional)</span>
@@ -276,12 +354,23 @@ function SignUpForm() {
               <input
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => !isInviteFlow && setEmail(e.target.value)}
                 required
-                className={inputClass(isRecruiter)}
+                readOnly={isInviteFlow}
+                className={`${inputClass(isRecruiter)} ${isInviteFlow ? "opacity-70 cursor-not-allowed" : ""}`}
                 placeholder={isRecruiter ? "you@company.com" : "you@example.com"}
               />
+              {isInviteFlow && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                </div>
+              )}
             </div>
+            {isInviteFlow && (
+              <p className="text-xs text-slate-500 mt-1">
+                Email is set by your invitation and cannot be changed
+              </p>
+            )}
           </div>
 
           {/* Phone */}
@@ -366,7 +455,9 @@ function SignUpForm() {
             type="submit"
             disabled={loading}
             className={`inline-flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-sm font-medium text-white shadow-lg transition disabled:opacity-50 ${
-              isRecruiter
+              isInviteFlow
+                ? "bg-purple-600 shadow-purple-700/25 hover:bg-purple-500"
+                : isRecruiter
                 ? "bg-purple-600 shadow-purple-700/25 hover:bg-purple-500"
                 : "bg-blue-600 shadow-blue-700/25 hover:bg-blue-500"
             }`}
@@ -375,15 +466,25 @@ function SignUpForm() {
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <>
-                {isRecruiter ? "Create Recruiter Account" : "Create Account"}
+                {isInviteFlow
+                  ? "Create Account & Join Team"
+                  : isRecruiter
+                  ? "Create Recruiter Account"
+                  : "Create Account"}
                 <ArrowRight className="h-4 w-4" />
               </>
             )}
           </button>
 
-          {isRecruiter && (
+          {isRecruiter && !isInviteFlow && (
             <p className="text-center text-xs text-slate-500">
               You&apos;ll choose your plan after signing up
+            </p>
+          )}
+
+          {isInviteFlow && (
+            <p className="text-center text-xs text-slate-500">
+              After creating your account, your team membership will be activated automatically
             </p>
           )}
         </form>
@@ -413,7 +514,10 @@ function SignUpForm() {
         {/* Sign in link */}
         <p className="mt-6 text-center text-sm text-slate-400">
           Already have an account?{" "}
-          <Link href="/signin" className="font-medium text-blue-400 transition hover:text-blue-300">
+          <Link
+            href={isInviteFlow ? `/signin?callbackUrl=/recruiter/invite/accept?token=${inviteToken}` : "/signin"}
+            className="font-medium text-blue-400 transition hover:text-blue-300"
+          >
             Sign in
           </Link>
         </p>
