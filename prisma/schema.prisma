@@ -454,9 +454,11 @@ model RecruiterInterview {
   // Recording
   recordingUrl          String?
   stealthMode           Boolean  @default(false)
+  pasteAttempts         Int      @default(0)
   liveTranscript        String?  @db.Text
   liveTranscriptUpdatedAt DateTime?
-  notes                 RecruiterInterviewNote[]           // Supabase Storage path
+  notes                 RecruiterInterviewNote[]
+  candidateMessages     CandidateInterviewMessage[]           // Supabase Storage path
   recordingUploadedAt   DateTime?
 
   shareToken            String            @unique @default(cuid())
@@ -610,4 +612,22 @@ model RecruiterInterviewNote {
   updatedAt   DateTime @updatedAt
   interview   RecruiterInterview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
   recruiter   RecruiterProfile   @relation(fields: [recruiterId], references: [id], onDelete: Cascade)
+}
+
+model CandidateInterviewMessage {
+  id          String   @id @default(cuid())
+  interviewId String
+  type        CandidateMessageType @default(MESSAGE)
+  category    String?
+  content     String   @db.Text
+  read        Boolean  @default(false)
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+  interview   RecruiterInterview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+}
+
+enum CandidateMessageType {
+  COMPLAINT
+  MESSAGE
+  QUESTION
 }
