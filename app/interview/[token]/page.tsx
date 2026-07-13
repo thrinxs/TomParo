@@ -6,10 +6,13 @@ import {
   Mic, Loader2, CheckCircle, AlertTriangle,
   Volume2, VolumeX, SkipForward, RotateCcw, Send,
   User, Calendar, ChevronRight, MessageSquare, Play, Square,
-  CornerDownRight,
+  CornerDownRight, Video, Type, Wifi, Monitor,
+  ChevronLeft, Shield, Clock, FileText, Headphones,
+  Camera, MicOff, RefreshCw, Heart,
 } from "lucide-react";
 import { ELEVENLABS_VOICES, DEFAULT_MALE_VOICE_ID, DEFAULT_FEMALE_VOICE_ID } from "@/lib/ai/interview-engine";
 
+// ── Pace slider ────────────────────────────────────────────────────────────────
 function lerp(a: number, b: number, t: number) { return Math.round(a + (b - a) * t); }
 function paceFromSlider(v: number) {
   const t = v / 100;
@@ -27,6 +30,7 @@ function paceLabel(v: number) {
   return "Fast 🏃";
 }
 
+// ── Name detection ─────────────────────────────────────────────────────────────
 const MALE_NAMES = new Set([
   "james","john","robert","michael","william","david","richard","joseph","charles",
   "thomas","christopher","daniel","paul","mark","donald","george","kenneth","steven",
@@ -76,31 +80,27 @@ function detectGender(name: string): "male" | "female" | null {
 const SILENCE_THRESHOLD = 8;
 const POLL_INTERVAL_MS = 3000;
 
+// ── ElevenLabs TTS ─────────────────────────────────────────────────────────────
 async function speakElevenLabs(text: string, voiceId: string, onEnd: () => void): Promise<() => void> {
   let cancelled = false;
   let audioEl: HTMLAudioElement | null = null;
-
   const res = await fetch("/api/tts", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text: text.trim(), voiceId }),
   });
-
-  // 503 = both ElevenLabs and HuggingFace failed — reject so doSpeak falls back to Web Speech
   if (!res.ok) throw new Error("TTS unavailable");
-
   const blob = await res.blob();
   if (cancelled) return () => {};
-
   const url = URL.createObjectURL(blob);
   audioEl = new Audio(url);
   audioEl.onended = () => { URL.revokeObjectURL(url); if (!cancelled) onEnd(); };
   audioEl.onerror = () => { URL.revokeObjectURL(url); if (!cancelled) onEnd(); };
   audioEl.play();
-
   return () => { cancelled = true; if (audioEl) { audioEl.pause(); audioEl.src = ""; } };
 }
 
+// ── Web Speech fallback ────────────────────────────────────────────────────────
 function getWebVoice(gender: "male" | "female" | "prefer-not-to-say"): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis.getVoices().filter((v) => v.lang.startsWith("en"));
   const priority = gender === "male"
@@ -140,209 +140,686 @@ function speakWebSpeech(text: string, gender: "male" | "female" | "prefer-not-to
   return () => { ended = true; clearTimeout(tid); clearTimeout(watchdog); window.speechSynthesis.cancel(); };
 }
 
-// ── Setup Screen ───────────────────────────────────────────────────────────────
-function SetupScreen({ candidateName, jobTitle, companyName, interviewType, voiceTier, defaultVoiceId, onStart }: {
+// ── System Check Types ─────────────────────────────────────────────────────────
+interface SystemCheck {
+  browser: "checking" | "pass" | "fail";
+  internet: "checking" | "pass" | "fail";
+  microphone: "checking" | "pass" | "fail" | "na";
+  camera: "checking" | "pass" | "fail" | "na";
+}
+
+// ── Setup Screen (5 steps) ─────────────────────────────────────────────────────
+function SetupScreen({
+  candidateName, jobTitle, companyName, interviewType,
+  voiceTier, defaultVoiceId, totalQuestions, onStart,
+}: {
   candidateName: string; jobTitle: string | null; companyName: string | null;
   interviewType: string; voiceTier: string; defaultVoiceId: string | null;
-  onStart: (gender: "male" | "female" | "prefer-not-to-say", dob: string, paceValue: number, voiceId: string | null) => void;
+  totalQuestions: number;
+  onStart: (
+    gender: "male" | "female" | "prefer-not-to-say",
+    dob: string, paceValue: number, voiceId: string | null
+  ) => void;
 }) {
+  const [step, setStep] = useState(1);
   const detected = detectGender(candidateName);
+  const [confirmedName, setConfirmedName] = useState(candidateName);
+  const [editingName, setEditingName] = useState(false);
   const [gender, setGender] = useState<"male" | "female" | "prefer-not-to-say">(detected || "prefer-not-to-say");
   const [dob, setDob] = useState("");
   const [dobError, setDobError] = useState("");
   const [paceValue, setPaceValue] = useState(45);
   const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(defaultVoiceId);
   const [isPreviewing, setIsPreviewing] = useState(false);
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
   const cancelPreviewRef = useRef<(() => void) | null>(null);
+  const [checks, setChecks] = useState<SystemCheck>({
+    browser: "checking", internet: "checking",
+    microphone: interviewType === "TEXT" ? "na" : "checking",
+    camera: interviewType === "VIDEO" ? "checking" : "na",
+  });
+  const [readyChecks, setReadyChecks] = useState({
+    quiet: false, device: false, time: false,
+  });
   const pace = paceFromSlider(paceValue);
   const isElevenLabs = voiceTier === "elevenlabs";
+  const needsMic = interviewType !== "TEXT";
+  const needsCamera = interviewType === "VIDEO";
+  const estimatedMins = Math.ceil(totalQuestions * 2);
+  const allChecksPass = Object.values(checks).every((v) => v === "pass" || v === "na");
 
+  // ── Step 2: Run system checks ──
   useEffect(() => {
-    if (!isElevenLabs || !defaultVoiceId) return;
-    if (selectedVoiceId === defaultVoiceId) {
-      setSelectedVoiceId(gender === "female" ? DEFAULT_FEMALE_VOICE_ID : DEFAULT_MALE_VOICE_ID);
+    if (step !== 2) return;
+
+    // Browser check
+    const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
+    const isEdge = /Edg/.test(navigator.userAgent);
+    const isFirefox = /Firefox/.test(navigator.userAgent);
+    const isSafari = /Safari/.test(navigator.userAgent) && !isChrome;
+    setChecks((prev) => ({
+      ...prev,
+      browser: isChrome || isEdge || isFirefox || isSafari ? "pass" : "fail",
+    }));
+
+    // Internet check
+    setChecks((prev) => ({
+      ...prev,
+      internet: navigator.onLine ? "pass" : "fail",
+    }));
+
+    // Mic check
+    if (needsMic) {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then((stream) => {
+          stream.getTracks().forEach((t) => t.stop());
+          setChecks((prev) => ({ ...prev, microphone: "pass" }));
+        })
+        .catch(() => setChecks((prev) => ({ ...prev, microphone: "fail" })));
     }
-  }, [gender]);
+
+    // Camera check
+    if (needsCamera) {
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then((stream) => {
+          stream.getTracks().forEach((t) => t.stop());
+          setChecks((prev) => ({ ...prev, camera: "pass" }));
+        })
+        .catch(() => setChecks((prev) => ({ ...prev, camera: "fail" })));
+    }
+  }, [step, needsMic, needsCamera]);
+
+  const rerunChecks = () => {
+    setChecks({
+      browser: "checking", internet: "checking",
+      microphone: needsMic ? "checking" : "na",
+      camera: needsCamera ? "checking" : "na",
+    });
+    setTimeout(() => {
+      setChecks((prev) => ({
+        ...prev,
+        browser: /Chrome|Firefox|Safari|Edg/.test(navigator.userAgent) ? "pass" : "fail",
+        internet: navigator.onLine ? "pass" : "fail",
+      }));
+      if (needsMic) {
+        navigator.mediaDevices.getUserMedia({ audio: true })
+          .then((s) => { s.getTracks().forEach((t) => t.stop()); setChecks((p) => ({ ...p, microphone: "pass" })); })
+          .catch(() => setChecks((p) => ({ ...p, microphone: "fail" })));
+      }
+      if (needsCamera) {
+        navigator.mediaDevices.getUserMedia({ video: true })
+          .then((s) => { s.getTracks().forEach((t) => t.stop()); setChecks((p) => ({ ...p, camera: "pass" })); })
+          .catch(() => setChecks((p) => ({ ...p, camera: "fail" })));
+      }
+    }, 100);
+  };
 
   const handlePreview = async () => {
     if (isPreviewing) { cancelPreviewRef.current?.(); cancelPreviewRef.current = null; setIsPreviewing(false); return; }
     setIsPreviewing(true);
     const text = `Hello! I'm your AI interviewer. This is how I will sound during your interview.`;
-    if (isElevenLabs && selectedVoiceId) {
-      cancelPreviewRef.current = await speakElevenLabs(text, selectedVoiceId, () => { setIsPreviewing(false); });
-    } else {
+    try {
+      if (isElevenLabs && selectedVoiceId) {
+        cancelPreviewRef.current = await speakElevenLabs(text, selectedVoiceId, () => { setIsPreviewing(false); });
+      } else {
+        cancelPreviewRef.current = speakWebSpeech(text, gender, pace.speechRate, () => { setIsPreviewing(false); });
+      }
+    } catch {
       cancelPreviewRef.current = speakWebSpeech(text, gender, pace.speechRate, () => { setIsPreviewing(false); });
     }
   };
 
   const handlePreviewVoice = async (voiceId: string) => {
     cancelPreviewRef.current?.();
-    if (isElevenLabs) await speakElevenLabs("Hello! I'm your AI interviewer for today.", voiceId, () => {});
+    setPreviewingVoiceId(voiceId);
+    try {
+      await speakElevenLabs("Hello! I'm your AI interviewer for today.", voiceId, () => { setPreviewingVoiceId(null); });
+    } catch { setPreviewingVoiceId(null); }
   };
 
   useEffect(() => () => { cancelPreviewRef.current?.(); }, []);
 
   const handleStart = () => {
-    if (!dob) { setDobError("Please enter your date of birth"); return; }
+    if (!dob) { setDobError("Please enter your date of birth"); setStep(3); return; }
     const age = Math.floor((Date.now() - new Date(dob).getTime()) / (1000 * 60 * 60 * 24 * 365));
-    if (age < 16 || age > 100) { setDobError("Please enter a valid date of birth"); return; }
+    if (age < 16 || age > 100) { setDobError("Please enter a valid date of birth"); setStep(3); return; }
     cancelPreviewRef.current?.();
     onStart(gender, dob, paceValue, selectedVoiceId);
   };
 
+  const canProceedStep3 = dob && !dobError;
+  const allReadyChecked = Object.values(readyChecks).every(Boolean);
+
+  const typeIcon = interviewType === "VOICE" ? Mic : interviewType === "VIDEO" ? Video : Type;
+  const TypeIcon = typeIcon;
+  const typeLabel = interviewType === "VOICE" ? "Voice Call" : interviewType === "VIDEO" ? "Video Interview" : "Text Interview";
+  const typeColor = interviewType === "VOICE" ? "violet" : interviewType === "VIDEO" ? "pink" : "indigo";
+  const typeColors = {
+    indigo: { bg: "bg-indigo-500/10", border: "border-indigo-500/20", text: "text-indigo-400", btn: "bg-indigo-600 hover:bg-indigo-500" },
+    violet: { bg: "bg-violet-500/10", border: "border-violet-500/20", text: "text-violet-400", btn: "bg-violet-600 hover:bg-violet-500" },
+    pink: { bg: "bg-pink-500/10", border: "border-pink-500/20", text: "text-pink-400", btn: "bg-pink-600 hover:bg-pink-500" },
+  }[typeColor];
+
+  const steps = [
+    { num: 1, label: "Welcome" },
+    { num: 2, label: "System Check" },
+    { num: 3, label: "Your Details" },
+    { num: 4, label: "Settings" },
+    { num: 5, label: "Ready" },
+  ];
+
+  // Skip step 4 for text interviews (no settings needed)
+  const availableSteps = interviewType === "TEXT"
+    ? steps.filter((s) => s.num !== 4)
+    : steps;
+
+  const nextStep = () => {
+    const currentIdx = availableSteps.findIndex((s) => s.num === step);
+    if (currentIdx < availableSteps.length - 1) {
+      setStep(availableSteps[currentIdx + 1].num);
+    }
+  };
+
+  const prevStep = () => {
+    const currentIdx = availableSteps.findIndex((s) => s.num === step);
+    if (currentIdx > 0) {
+      setStep(availableSteps[currentIdx - 1].num);
+    }
+  };
+
+  const isFirstStep = availableSteps[0].num === step;
+  const isLastStep = availableSteps[availableSteps.length - 1].num === step;
+  const currentStepIdx = availableSteps.findIndex((s) => s.num === step);
+
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center p-6">
-      <div className="w-full max-w-md space-y-5">
-        <div className="text-center">
-          <div className="w-16 h-16 rounded-2xl bg-purple-500/20 flex items-center justify-center mx-auto mb-4">
-            <MessageSquare className="w-8 h-8 text-purple-400" />
-          </div>
-          <h1 className="text-2xl font-bold text-white mb-1">Hi, {candidateName.split(" ")[0]}!</h1>
-          <p className="text-slate-400 text-sm">
-            {companyName} has invited you to a {interviewType === "VOICE" ? "Voice Call" : "Text"} interview
-            {jobTitle ? ` for the ${jobTitle} position` : ""}.
-          </p>
-        </div>
+    <div className="min-h-screen bg-[#0a0a0f] flex flex-col">
 
-        <div className={`rounded-2xl border p-4 text-center ${interviewType === "VOICE" ? "border-violet-500/20 bg-violet-500/5" : "border-indigo-500/20 bg-indigo-500/5"}`}>
-          {interviewType === "VOICE" ? (
-            <>
-              <Mic className="w-6 h-6 text-violet-400 mx-auto mb-2" />
-              <p className="text-sm font-semibold text-white mb-1">Voice Interview</p>
-              <p className="text-xs text-slate-400">AI will read each question aloud. Speak your answers clearly.</p>
-              {isElevenLabs && <p className="text-xs text-violet-400 mt-1">✨ Human-like AI voice enabled</p>}
-            </>
-          ) : (
-            <>
-              <MessageSquare className="w-6 h-6 text-indigo-400 mx-auto mb-2" />
-              <p className="text-sm font-semibold text-white mb-1">Text Interview</p>
-              <p className="text-xs text-slate-400">Read each question and type your answer. No timer.</p>
-            </>
+      {/* ── Top bar ── */}
+      <div className="border-b border-white/5 bg-[#0a0a0f]/80 backdrop-blur-xl sticky top-0 z-10">
+        <div className="max-w-xl mx-auto px-6 py-4">
+          {/* Company + role */}
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="text-xs text-slate-500">{companyName || "TomParo"}</p>
+              <p className="text-sm font-semibold text-white truncate max-w-[200px]">{jobTitle || "Interview"}</p>
+            </div>
+            <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border ${typeColors.bg} ${typeColors.border} ${typeColors.text}`}>
+              <TypeIcon className="w-3.5 h-3.5" />
+              {typeLabel}
+            </div>
+          </div>
+
+          {/* Step progress bar */}
+          <div className="flex items-center gap-2">
+            {availableSteps.map((s, idx) => (
+              <div key={s.num} className="flex items-center gap-2 flex-1">
+                <div className="flex flex-col items-center gap-1 flex-1">
+                  <div className={`h-1 rounded-full w-full transition-all duration-500 ${idx < currentStepIdx ? "bg-purple-500" : idx === currentStepIdx ? "bg-purple-400" : "bg-white/10"}`} />
+                  <p className={`text-[9px] font-medium transition-colors ${idx === currentStepIdx ? "text-purple-400" : idx < currentStepIdx ? "text-slate-400" : "text-slate-600"}`}>
+                    {s.label}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Content ── */}
+      <div className="flex-1 flex items-start justify-center px-6 py-8">
+        <div className="w-full max-w-xl space-y-6">
+
+          {/* ══ STEP 1: Welcome ══ */}
+          {step === 1 && (
+            <div className="space-y-5">
+              {/* Greeting */}
+              <div className="text-center space-y-2">
+                <div className={`w-16 h-16 rounded-2xl ${typeColors.bg} flex items-center justify-center mx-auto`}>
+                  <TypeIcon className={`w-8 h-8 ${typeColors.text}`} />
+                </div>
+                <h1 className="text-2xl font-bold text-white">
+                  Hi, {candidateName.split(" ")[0]}! 👋
+                </h1>
+                <p className="text-slate-400 text-sm max-w-sm mx-auto">
+                  {companyName} has invited you for a {typeLabel.toLowerCase()}. Let's get you set up.
+                </p>
+              </div>
+
+              {/* Interview overview */}
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-4">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-slate-400" />
+                  Interview Overview
+                </h3>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: "Company", value: companyName || "—" },
+                    { label: "Role", value: jobTitle || "General Interview" },
+                    { label: "Questions", value: `${totalQuestions} questions` },
+                    { label: "Est. Time", value: `~${estimatedMins} minutes` },
+                    { label: "Format", value: typeLabel },
+                    { label: "Mode", value: "Self-paced" },
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">{item.label}</p>
+                      <p className="text-sm font-medium text-white truncate">{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* What to expect */}
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
+                <h3 className="text-sm font-semibold text-white">What to expect</h3>
+                <div className="space-y-2.5">
+                  {[
+                    interviewType === "TEXT"
+                      ? { icon: MessageSquare, text: "Read each question and type your answer", color: "text-indigo-400" }
+                      : interviewType === "VOICE"
+                      ? { icon: Volume2, text: "AI will read each question aloud to you", color: "text-violet-400" }
+                      : { icon: Video, text: "Camera + mic interview with AI questions", color: "text-pink-400" },
+                    { icon: CheckCircle, text: "AI scores every answer automatically", color: "text-emerald-400" },
+                    { icon: Shield, text: "Your session is private and secure", color: "text-blue-400" },
+                    { icon: Clock, text: `Take your time — no hard time limit`, color: "text-amber-400" },
+                    ...(needsMic ? [{ icon: Headphones, text: "Headphones recommended for best experience", color: "text-slate-400" }] : []),
+                  ].map((item, i) => (
+                    <div key={i} className="flex items-start gap-3">
+                      <item.icon className={`w-4 h-4 ${item.color} shrink-0 mt-0.5`} />
+                      <p className="text-sm text-slate-300">{item.text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Encouragement */}
+              <div className="rounded-xl border border-purple-500/10 bg-purple-500/5 p-4 flex items-start gap-3">
+                <Heart className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                <p className="text-sm text-slate-300">
+                  Take a deep breath and answer naturally. There are no trick questions — just be yourself.
+                </p>
+              </div>
+            </div>
           )}
-        </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
-          <div className="flex items-center gap-2">
-            <User className="w-4 h-4 text-slate-400" />
-            <p className="text-sm font-semibold text-white">Your Gender</p>
-            {detected && <span className="text-[10px] text-slate-500 ml-auto">detected — change if incorrect</span>}
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            {(["male", "female", "prefer-not-to-say"] as const).map((g) => (
-              <button key={g} onClick={() => setGender(g)} className={`py-2.5 rounded-xl text-xs font-medium transition border ${gender === g ? "bg-purple-600 border-purple-600 text-white" : "border-white/10 bg-white/[0.02] text-slate-400 hover:border-white/20"}`}>
-                {g === "prefer-not-to-say" ? "Prefer not to say" : g.charAt(0).toUpperCase() + g.slice(1)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-slate-400" />
-            <p className="text-sm font-semibold text-white">Date of Birth</p>
-          </div>
-          <input type="date" value={dob}
-            onChange={(e) => { setDob(e.target.value); setDobError(""); }}
-            max={new Date(Date.now() - 16 * 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]}
-            className="w-full rounded-xl border border-white/10 bg-slate-900/50 px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500/50 transition"
-          />
-          {dobError && <p className="text-xs text-red-400">{dobError}</p>}
-        </div>
-
-        {interviewType === "VOICE" && (
-          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-white">Interview Pace</p>
-              <span className="text-xs font-semibold text-purple-400">{paceLabel(paceValue)}</span>
-            </div>
-            <div className="space-y-3">
-              <input type="range" min={0} max={100} step={1} value={paceValue}
-                onChange={(e) => setPaceValue(parseInt(e.target.value))}
-                className="w-full h-2 rounded-full appearance-none cursor-pointer"
-                style={{ accentColor: "#9333ea" }}
-              />
-              <div className="flex justify-between">
-                <span className="text-[10px] text-slate-600">🐢 Very Slow</span>
-                <span className="text-[10px] text-slate-600">🏃 Very Fast</span>
+          {/* ══ STEP 2: System Check ══ */}
+          {step === 2 && (
+            <div className="space-y-5">
+              <div className="text-center space-y-1">
+                <h2 className="text-xl font-bold text-white">System Check</h2>
+                <p className="text-slate-400 text-sm">Making sure everything is ready before we begin.</p>
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="rounded-xl border border-white/5 bg-white/[0.02] p-2.5 text-center">
-                  <p className="text-[10px] text-slate-500 mb-0.5">Repeat after</p>
-                  <p className="text-sm font-bold text-white">{(pace.silenceRepeat / 1000).toFixed(1)}s</p>
-                </div>
-                <div className="rounded-xl border border-white/5 bg-white/[0.02] p-2.5 text-center">
-                  <p className="text-[10px] text-slate-500 mb-0.5">Skip after</p>
-                  <p className="text-sm font-bold text-white">{((pace.silenceRepeat + pace.silenceSkip) / 1000).toFixed(0)}s</p>
-                </div>
-                <div className="rounded-xl border border-white/5 bg-white/[0.02] p-2.5 text-center">
-                  <p className="text-[10px] text-slate-500 mb-0.5">AI speed</p>
-                  <p className="text-sm font-bold text-white">{pace.speechRate}×</p>
-                </div>
-              </div>
-              <button onClick={handlePreview} className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition border ${isPreviewing ? "bg-purple-600 border-purple-600 text-white" : "border-white/10 bg-white/5 text-slate-400 hover:text-white hover:bg-white/10"}`}>
-                {isPreviewing ? <><Square className="w-3 h-3" />Stop preview</> : <><Play className="w-3 h-3" />Preview pace + voice</>}
-              </button>
-            </div>
-          </div>
-        )}
 
-        {interviewType === "VOICE" && isElevenLabs && (
-          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold text-white">AI Voice</p>
-                <p className="text-[10px] text-slate-500 mt-0.5">Your recruiter set a default. You can change it.</p>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
+                {[
+                  {
+                    key: "browser" as const,
+                    label: "Browser Supported",
+                    icon: Monitor,
+                    desc: "Chrome, Edge, Firefox, or Safari",
+                  },
+                  {
+                    key: "internet" as const,
+                    label: "Internet Connection",
+                    icon: Wifi,
+                    desc: "Stable connection required",
+                  },
+                  ...(needsMic ? [{
+                    key: "microphone" as const,
+                    label: "Microphone",
+                    icon: Mic,
+                    desc: "Allow mic access when prompted",
+                  }] : []),
+                  ...(needsCamera ? [{
+                    key: "camera" as const,
+                    label: "Camera",
+                    icon: Camera,
+                    desc: "Allow camera access when prompted",
+                  }] : []),
+                ].map((check) => {
+                  const status = checks[check.key];
+                  return (
+                    <div key={check.key} className={`flex items-center gap-4 p-4 rounded-xl border transition ${
+                      status === "pass" ? "border-emerald-500/20 bg-emerald-500/5"
+                      : status === "fail" ? "border-red-500/20 bg-red-500/5"
+                      : "border-white/5 bg-white/[0.02]"
+                    }`}>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                        status === "pass" ? "bg-emerald-500/20"
+                        : status === "fail" ? "bg-red-500/20"
+                        : "bg-white/5"
+                      }`}>
+                        <check.icon className={`w-5 h-5 ${
+                          status === "pass" ? "text-emerald-400"
+                          : status === "fail" ? "text-red-400"
+                          : "text-slate-400"
+                        }`} />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-white">{check.label}</p>
+                        <p className="text-xs text-slate-500">{check.desc}</p>
+                      </div>
+                      <div className="shrink-0">
+                        {status === "checking" && <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />}
+                        {status === "pass" && <CheckCircle className="w-5 h-5 text-emerald-400" />}
+                        {status === "fail" && <AlertTriangle className="w-5 h-5 text-red-400" />}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <span className="text-[10px] text-slate-500">▶ to preview</span>
+
+              {/* Fail guidance */}
+              {checks.microphone === "fail" && (
+                <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4 space-y-2">
+                  <p className="text-sm font-semibold text-red-400">Microphone access denied</p>
+                  <p className="text-xs text-slate-400">Click the camera/mic icon in your browser address bar and allow access, then retry.</p>
+                </div>
+              )}
+              {checks.camera === "fail" && (
+                <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4 space-y-2">
+                  <p className="text-sm font-semibold text-red-400">Camera access denied</p>
+                  <p className="text-xs text-slate-400">Click the camera icon in your browser address bar and allow access, then retry.</p>
+                </div>
+              )}
+
+              {!allChecksPass && (
+                <button onClick={rerunChecks}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-white/10 bg-white/5 text-slate-400 text-sm font-medium hover:text-white transition">
+                  <RefreshCw className="w-4 h-4" /> Retry Checks
+                </button>
+              )}
+
+              {allChecksPass && (
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-center">
+                  <CheckCircle className="w-6 h-6 text-emerald-400 mx-auto mb-1" />
+                  <p className="text-sm font-semibold text-emerald-400">All checks passed!</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Your device is ready for the interview.</p>
+                </div>
+              )}
             </div>
-            <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-              {ELEVENLABS_VOICES.map((v) => (
-                <div key={v.id} onClick={() => setSelectedVoiceId(v.id)}
-                  className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition border cursor-pointer ${selectedVoiceId === v.id ? "bg-purple-600 border-purple-600 text-white" : "border-white/10 bg-white/[0.02] text-slate-400 hover:border-white/20 hover:text-white"}`}>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium">{v.name}</p>
-                    <p className={`text-[10px] truncate ${selectedVoiceId === v.id ? "text-purple-200" : "text-slate-600"}`}>{v.desc}</p>
+          )}
+
+          {/* ══ STEP 3: Your Details ══ */}
+          {step === 3 && (
+            <div className="space-y-5">
+              <div className="text-center space-y-1">
+                <h2 className="text-xl font-bold text-white">Your Details</h2>
+                <p className="text-slate-400 text-sm">Confirm your information before the interview.</p>
+              </div>
+
+              {/* Name confirmation */}
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <User className="w-4 h-4 text-slate-400" />
+                  <p className="text-sm font-semibold text-white">Your Name</p>
+                </div>
+                {editingName ? (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={confirmedName}
+                      onChange={(e) => setConfirmedName(e.target.value)}
+                      className="flex-1 rounded-xl border border-white/10 bg-slate-900/50 px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500/50 transition"
+                    />
+                    <button onClick={() => setEditingName(false)}
+                      className="px-4 py-2.5 rounded-xl bg-purple-600 text-white text-sm font-semibold hover:bg-purple-500 transition">
+                      Save
+                    </button>
                   </div>
-                  <button onClick={(e) => { e.stopPropagation(); handlePreviewVoice(v.id); }}
-                    className={`ml-3 p-1.5 rounded-lg shrink-0 transition ${selectedVoiceId === v.id ? "hover:bg-white/20 text-white" : "hover:bg-white/10 text-slate-500 hover:text-white"}`}>
-                    <Play className="w-3 h-3" />
-                  </button>
+                ) : (
+                  <div className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-white/[0.02]">
+                    <p className="text-white font-medium">{confirmedName}</p>
+                    <button onClick={() => setEditingName(true)}
+                      className="text-xs text-purple-400 hover:text-purple-300 transition">
+                      Edit
+                    </button>
+                  </div>
+                )}
+                <p className="text-xs text-slate-500">This is the name that will appear on your interview record.</p>
+              </div>
+
+              {/* Gender */}
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <User className="w-4 h-4 text-slate-400" />
+                  <p className="text-sm font-semibold text-white">Your Gender</p>
+                  {detected && <span className="text-[10px] text-slate-500 ml-auto">auto-detected — change if incorrect</span>}
                 </div>
-              ))}
+                <div className="grid grid-cols-3 gap-2">
+                  {(["male", "female", "prefer-not-to-say"] as const).map((g) => (
+                    <button key={g} onClick={() => setGender(g)}
+                      className={`py-2.5 rounded-xl text-xs font-medium transition border ${gender === g ? "bg-purple-600 border-purple-600 text-white" : "border-white/10 bg-white/[0.02] text-slate-400 hover:border-white/20"}`}>
+                      {g === "prefer-not-to-say" ? "Prefer not to say" : g.charAt(0).toUpperCase() + g.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* DOB */}
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-slate-400" />
+                  <p className="text-sm font-semibold text-white">Date of Birth</p>
+                </div>
+                <input type="date" value={dob}
+                  onChange={(e) => { setDob(e.target.value); setDobError(""); }}
+                  max={new Date(Date.now() - 16 * 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]}
+                  className="w-full rounded-xl border border-white/10 bg-slate-900/50 px-4 py-2.5 text-sm text-white outline-none focus:border-purple-500/50 transition"
+                />
+                {dobError && <p className="text-xs text-red-400">{dobError}</p>}
+                <p className="text-xs text-slate-500">Required for identity verification purposes.</p>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {interviewType === "VOICE" && (
-          <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 space-y-1.5">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Tips</p>
-            {[
-              "Find a quiet place with no background noise",
-              "Speak clearly into your microphone",
-              `Silent for ${(pace.silenceRepeat / 1000).toFixed(0)}s → AI repeats the question`,
-              `Silent for ${((pace.silenceRepeat + pace.silenceSkip) / 1000).toFixed(0)}s total → question skipped`,
-              "AI may ask a follow-up if your answer is interesting — answer naturally",
-            ].map((tip) => (
-              <p key={tip} className="text-xs text-slate-500 flex items-start gap-2">
-                <span className="text-purple-400 mt-0.5 shrink-0">•</span>{tip}
+          {/* ══ STEP 4: Settings (Voice/Video only) ══ */}
+          {step === 4 && (
+            <div className="space-y-5">
+              <div className="text-center space-y-1">
+                <h2 className="text-xl font-bold text-white">Interview Settings</h2>
+                <p className="text-slate-400 text-sm">Customise your interview experience.</p>
+              </div>
+
+              {/* Pace slider */}
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-white">Interview Pace</p>
+                  <span className="text-xs font-semibold text-purple-400">{paceLabel(paceValue)}</span>
+                </div>
+                <p className="text-xs text-slate-500">How fast should the AI move when you're silent?</p>
+                <input type="range" min={0} max={100} step={1} value={paceValue}
+                  onChange={(e) => setPaceValue(parseInt(e.target.value))}
+                  className="w-full h-2 rounded-full appearance-none cursor-pointer"
+                  style={{ accentColor: "#9333ea" }}
+                />
+                <div className="flex justify-between">
+                  <span className="text-[10px] text-slate-600">🐢 Very Slow</span>
+                  <span className="text-[10px] text-slate-600">🏃 Very Fast</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: "Repeat after", value: `${(pace.silenceRepeat / 1000).toFixed(1)}s` },
+                    { label: "Skip after", value: `${((pace.silenceRepeat + pace.silenceSkip) / 1000).toFixed(0)}s` },
+                    { label: "AI speed", value: `${pace.speechRate}×` },
+                  ].map((s) => (
+                    <div key={s.label} className="rounded-xl border border-white/5 bg-white/[0.02] p-2.5 text-center">
+                      <p className="text-[10px] text-slate-500 mb-0.5">{s.label}</p>
+                      <p className="text-sm font-bold text-white">{s.value}</p>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={handlePreview}
+                  className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition border ${isPreviewing ? "bg-purple-600 border-purple-600 text-white" : "border-white/10 bg-white/5 text-slate-400 hover:text-white hover:bg-white/10"}`}>
+                  {isPreviewing ? <><Square className="w-3 h-3" />Stop preview</> : <><Play className="w-3 h-3" />Preview voice + pace</>}
+                </button>
+              </div>
+
+              {/* Voice picker (ElevenLabs only) */}
+              {isElevenLabs && (
+                <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-white">AI Voice</p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">Choose the interviewer's voice. ▶ to preview.</p>
+                    </div>
+                    <span className="text-[10px] px-2 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400">✨ Premium</span>
+                  </div>
+                  <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                    {ELEVENLABS_VOICES.map((v) => (
+                      <div key={v.id} onClick={() => setSelectedVoiceId(v.id)}
+                        className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition border cursor-pointer ${selectedVoiceId === v.id ? "bg-purple-600 border-purple-600 text-white" : "border-white/10 bg-white/[0.02] text-slate-400 hover:border-white/20 hover:text-white"}`}>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium">{v.name}</p>
+                          <p className={`text-[10px] truncate ${selectedVoiceId === v.id ? "text-purple-200" : "text-slate-600"}`}>{v.desc}</p>
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); handlePreviewVoice(v.id); }}
+                          className={`ml-3 p-1.5 rounded-lg shrink-0 transition ${selectedVoiceId === v.id ? "hover:bg-white/20 text-white" : "hover:bg-white/10 text-slate-500 hover:text-white"}`}>
+                          {previewingVoiceId === v.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Tips */}
+              <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 space-y-2">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tips for Voice Interviews</p>
+                {[
+                  "Find a quiet place with no background noise",
+                  "Speak clearly and at a natural pace",
+                  `If silent for ${(pace.silenceRepeat / 1000).toFixed(0)}s → AI repeats the question`,
+                  `If silent for ${((pace.silenceRepeat + pace.silenceSkip) / 1000).toFixed(0)}s total → question is skipped`,
+                  "AI may ask a follow-up — answer naturally",
+                ].map((tip) => (
+                  <p key={tip} className="text-xs text-slate-500 flex items-start gap-2">
+                    <span className="text-purple-400 mt-0.5 shrink-0">•</span>{tip}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ══ STEP 5: Ready ══ */}
+          {step === 5 && (
+            <div className="space-y-5">
+              <div className="text-center space-y-1">
+                <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-3">
+                  <CheckCircle className="w-8 h-8 text-emerald-400" />
+                </div>
+                <h2 className="text-xl font-bold text-white">You're all set!</h2>
+                <p className="text-slate-400 text-sm">Read the guidelines below then begin when ready.</p>
+              </div>
+
+              {/* Summary */}
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
+                <p className="text-xs font-semibold text-white uppercase tracking-wider">Your Setup Summary</p>
+                <div className="space-y-2">
+                  {[
+                    { label: "Name", value: confirmedName },
+                    { label: "Interview type", value: typeLabel },
+                    { label: "Questions", value: `${totalQuestions} questions` },
+                    { label: "Est. time", value: `~${estimatedMins} minutes` },
+                    ...(needsMic ? [{ label: "Pace", value: paceLabel(paceValue) }] : []),
+                  ].map((item) => (
+                    <div key={item.label} className="flex items-center justify-between text-sm">
+                      <span className="text-slate-500">{item.label}</span>
+                      <span className="text-white font-medium">{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Rules */}
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
+                <p className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Shield className="w-3.5 h-3.5 text-slate-400" /> Interview Guidelines
+                </p>
+                <div className="space-y-2.5">
+                  {[
+                    "Answer each question as fully as possible",
+                    "You cannot return to previous questions",
+                    "Do not close or refresh this page during the interview",
+                    needsMic ? "Stay in a quiet environment throughout" : null,
+                    "Your responses will be reviewed by the recruiter",
+                    "AI will score your answers — recruiters will review",
+                  ].filter(Boolean).map((rule, i) => (
+                    <div key={i} className="flex items-start gap-2.5">
+                      <div className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center shrink-0 mt-0.5">
+                        <span className="text-[10px] text-slate-500 font-bold">{i + 1}</span>
+                      </div>
+                      <p className="text-sm text-slate-300">{rule}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Ready checklist */}
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
+                <p className="text-xs font-semibold text-white uppercase tracking-wider">Confirm you are ready</p>
+                <div className="space-y-2">
+                  {[
+                    { key: "quiet" as const, label: needsMic ? "I'm in a quiet place with no distractions" : "I'm in a comfortable place with no distractions" },
+                    { key: "device" as const, label: needsMic ? "My microphone is working" : "My device is working correctly" },
+                    { key: "time" as const, label: `I have ~${estimatedMins} minutes available` },
+                  ].map((item) => (
+                    <label key={item.key} className="flex items-start gap-3 cursor-pointer group">
+                      <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center shrink-0 mt-0.5 transition ${readyChecks[item.key] ? "bg-purple-600 border-purple-600" : "border-white/20 group-hover:border-white/40"}`}
+                        onClick={() => setReadyChecks((p) => ({ ...p, [item.key]: !p[item.key] }))}>
+                        {readyChecks[item.key] && <CheckCircle className="w-3 h-3 text-white" />}
+                      </div>
+                      <p className="text-sm text-slate-300">{item.label}</p>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Consent */}
+              <p className="text-center text-[11px] text-slate-600">
+                By starting, you consent to this interview being recorded and your responses being evaluated by AI and the recruiter.
               </p>
-            ))}
-          </div>
-        )}
+            </div>
+          )}
 
-        <button onClick={handleStart} className="w-full py-3.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-sm transition flex items-center justify-center gap-2">
-          Begin Interview <ChevronRight className="w-4 h-4" />
-        </button>
-        <p className="text-center text-[11px] text-slate-600">
-          By starting, you consent to this interview being recorded for evaluation purposes.
-        </p>
+          {/* ── Navigation buttons ── */}
+          <div className="flex gap-3 pt-2">
+            {!isFirstStep && (
+              <button onClick={prevStep}
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl border border-white/10 bg-white/5 text-slate-400 text-sm font-medium hover:text-white transition">
+                <ChevronLeft className="w-4 h-4" /> Back
+              </button>
+            )}
+
+            {!isLastStep ? (
+              <button
+                onClick={nextStep}
+                disabled={step === 2 && !allChecksPass || step === 3 && !canProceedStep3}
+                className={`flex-1 inline-flex items-center justify-center gap-2 py-3 rounded-xl text-white text-sm font-semibold transition disabled:opacity-40 ${typeColors.btn}`}>
+                {step === 2 && !allChecksPass ? "Fix issues above" : "Continue"}
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                onClick={handleStart}
+                disabled={!allReadyChecked}
+                className="flex-1 inline-flex items-center justify-center gap-2 py-3.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold transition disabled:opacity-40 disabled:cursor-not-allowed">
+                {!allReadyChecked ? "Check all boxes above" : "Begin Interview"}
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
 // ── Voice Call Screen ──────────────────────────────────────────────────────────
-function VoiceCallScreen({ interview, currentIndex, isAISpeaking, isListening, transcript, silencePhase, onConfirm, onReRecord, onSkip, confirming, phase, liveJoined, isFollowUp, followUpQuestion }: {
+function VoiceCallScreen({
+  interview, currentIndex, isAISpeaking, isListening, transcript,
+  silencePhase, onConfirm, onReRecord, onSkip, confirming, phase, liveJoined,
+  isFollowUp, followUpQuestion,
+}: {
   interview: any; currentIndex: number; isAISpeaking: boolean; isListening: boolean;
   transcript: string; silencePhase: "none" | "warn" | "skip"; onConfirm: () => void;
   onReRecord: () => void; onSkip: () => void; confirming: boolean; phase: string;
@@ -383,7 +860,9 @@ function VoiceCallScreen({ interview, currentIndex, isAISpeaking, isListening, t
           <CheckCircle className="w-20 h-20 text-emerald-400 mx-auto" />
           <div>
             <h2 className="text-2xl font-bold text-white mb-2">Interview Complete!</h2>
-            <p className="text-slate-400 text-sm">Thank you, {interview.candidateName.split(" ")[0]}. Your responses have been recorded. The team will be in touch soon.</p>
+            <p className="text-slate-400 text-sm">
+              Thank you, {interview.candidateName.split(" ")[0]}. Your responses have been recorded. The team will be in touch soon.
+            </p>
           </div>
           <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
             <p className="text-sm text-emerald-400 font-medium">{answeredCount} of {interview.totalQuestions} questions answered</p>
@@ -492,7 +971,12 @@ function VoiceCallScreen({ interview, currentIndex, isAISpeaking, isListening, t
 }
 
 // ── Text Interview Screen ──────────────────────────────────────────────────────
-function TextInterviewScreen({ interview, currentIndex, answer, setAnswer, onSubmit, submitting, onNext, justAnswered, setCurrentIndex, setJustAnswered, phase, pendingFollowUp, onAnswerFollowUp, followUpAnswer, setFollowUpAnswer, submittingFollowUp, followUpJustAnswered, onNextAfterFollowUp }: {
+function TextInterviewScreen({
+  interview, currentIndex, answer, setAnswer, onSubmit, submitting,
+  onNext, justAnswered, setCurrentIndex, setJustAnswered, phase,
+  pendingFollowUp, onAnswerFollowUp, followUpAnswer, setFollowUpAnswer,
+  submittingFollowUp, followUpJustAnswered, onNextAfterFollowUp,
+}: {
   interview: any; currentIndex: number; answer: string; setAnswer: (v: string) => void;
   onSubmit: () => void; submitting: boolean; onNext: () => void; justAnswered: boolean;
   setCurrentIndex: (i: number) => void; setJustAnswered: (v: boolean) => void; phase: string;
@@ -543,6 +1027,7 @@ function TextInterviewScreen({ interview, currentIndex, answer, setAnswer, onSub
           <div className="h-1 bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-500" style={{ width: `${progress}%` }} />
         </div>
       </div>
+
       <div className="max-w-3xl mx-auto px-6 py-10 space-y-6">
         <div className="text-center">
           <div className="w-16 h-16 rounded-2xl bg-purple-500/20 flex items-center justify-center mx-auto mb-4">
@@ -677,7 +1162,6 @@ function InterviewSession() {
   const [submitting, setSubmitting] = useState(false);
   const [justAnswered, setJustAnswered] = useState(false);
 
-  // ── Refs ──
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const audioStreamRef = useRef<MediaStream | null>(null);
@@ -715,7 +1199,6 @@ function InterviewSession() {
   useEffect(() => { followUpQuestionIdRef.current = followUpQuestionId; }, [followUpQuestionId]);
   useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
 
-  // ── Load interview ──
   useEffect(() => {
     const load = async () => {
       try {
@@ -737,7 +1220,69 @@ function InterviewSession() {
     load();
   }, [token]);
 
-  // ── doSpeak — finish guard prevents double-fire ──
+  useEffect(() => {
+    if (!setupDone || !interview || interview.mode !== "ASYNC") return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/interview-session/${token}`);
+        const data = await res.json();
+        if (!res.ok) return;
+        if (data.interview.isLive && !liveJoined) {
+          setLiveJoined(true); stopListening();
+          const msg = data.interview.liveMessage || "Your interviewer has joined and will continue the interview.";
+          lastLiveMessageRef.current = msg;
+          doSpeak(msg, () => {});
+          return;
+        }
+        if (data.interview.isLive && data.interview.liveMessage) {
+          const newMsg = data.interview.liveMessage;
+          if (newMsg !== lastLiveMessageRef.current) {
+            lastLiveMessageRef.current = newMsg;
+            stopListening();
+            doSpeak(newMsg, () => { if (interviewRef.current?.interviewType === "VOICE") startListeningForAnswer(); });
+          }
+        }
+        if (!data.interview.isLive && liveJoined) {
+          setLiveJoined(false);
+          doSpeak("Your interviewer has left. Please continue answering the remaining questions.", () => {
+            if (interviewRef.current?.interviewType === "VOICE") startListeningForAnswer();
+          });
+        }
+      } catch {}
+    }, POLL_INTERVAL_MS);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [setupDone, interview, token, liveJoined]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      recordingChunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) recordingChunksRef.current.push(e.data); };
+      recorder.start(1000);
+      mediaRecorderRef.current = recorder;
+    } catch (err) { console.warn("Recording not available:", err); }
+  };
+
+  const stopAndUploadRecording = async (interviewId: string) => {
+    if (!mediaRecorderRef.current) return;
+    return new Promise<void>((resolve) => {
+      mediaRecorderRef.current!.onstop = async () => {
+        try {
+          const blob = new Blob(recordingChunksRef.current, { type: "audio/webm" });
+          const fd = new FormData();
+          fd.append("recording", blob, "interview.webm");
+          await fetch(`/api/recruiter/interviews/${interviewId}/recording`, {
+            method: "POST", headers: { "x-share-token": token }, body: fd,
+          });
+        } catch {}
+        finally { audioStreamRef.current?.getTracks().forEach((t) => t.stop()); resolve(); }
+      };
+      mediaRecorderRef.current!.stop();
+    });
+  };
+
   const doSpeak = useCallback((text: string, onEnd: () => void) => {
     cancelSpeakRef.current?.();
     setIsAISpeaking(true);
@@ -757,7 +1302,6 @@ function InterviewSession() {
     }
   }, []);
 
-  // ── Stop silence detection ──
   const stopSilenceDetection = useCallback(() => {
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
     if (repeatTimerRef.current) { clearTimeout(repeatTimerRef.current); repeatTimerRef.current = null; }
@@ -769,7 +1313,6 @@ function InterviewSession() {
     setSilencePhase("none");
   }, []);
 
-  // ── Stop AssemblyAI WebSocket ──
   const stopAssemblyAI = useCallback(() => {
     if (scriptProcessorRef.current) { scriptProcessorRef.current.disconnect(); scriptProcessorRef.current = null; }
     if (aaiAudioContextRef.current) { aaiAudioContextRef.current.close().catch(() => {}); aaiAudioContextRef.current = null; }
@@ -780,7 +1323,6 @@ function InterviewSession() {
     }
   }, []);
 
-  // ── Stop listening ──
   const stopListening = useCallback(() => {
     stopAssemblyAI();
     stopSilenceDetection();
@@ -788,7 +1330,6 @@ function InterviewSession() {
     isListeningRef.current = false;
   }, [stopAssemblyAI, stopSilenceDetection]);
 
-  // ── Submit answer ──
   const submitAnswer = useCallback(async (questionId: string, answer: string) => {
     const iv = interviewRef.current;
     try {
@@ -808,7 +1349,6 @@ function InterviewSession() {
     } catch { return false; }
   }, [token]);
 
-  // ── Check follow-up ──
   const checkFollowUp = useCallback(async (questionId: string, answer: string): Promise<boolean> => {
     const iv = interviewRef.current;
     if (!iv?.allowFollowUps) return false;
@@ -837,7 +1377,6 @@ function InterviewSession() {
     finally { setCheckingFollowUp(false); }
   }, [token]);
 
-  // ── End interview ──
   const endInterview = useCallback(async () => {
     stopListening();
     setPhase("closing");
@@ -852,7 +1391,6 @@ function InterviewSession() {
     }
   }, [stopListening, doSpeak]);
 
-  // ── Skip question — declared BEFORE startSilenceDetection ──
   const handleSkipQuestion = useCallback(async () => {
     stopListening();
     if (repeatTimerRef.current) { clearTimeout(repeatTimerRef.current); repeatTimerRef.current = null; }
@@ -875,7 +1413,6 @@ function InterviewSession() {
     proceedToNext();
   }, [stopListening, token]);
 
-  // ── Silence detection — declared AFTER handleSkipQuestion ──
   const startSilenceDetection = useCallback((stream: MediaStream) => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -889,7 +1426,6 @@ function InterviewSession() {
       isRepeatingRef.current = false;
       setSilencePhase("none");
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
       const check = () => {
         if (isRepeatingRef.current || !analyserRef.current) return;
         analyserRef.current.getByteFrequencyData(dataArray);
@@ -930,13 +1466,11 @@ function InterviewSession() {
     } catch (err) { console.warn("Silence detection not available:", err); }
   }, [doSpeak, stopListening, handleSkipQuestion]);
 
-  // ── AssemblyAI — start listening ──
   const startListeningForAnswer = useCallback(async () => {
     stopAssemblyAI();
     stopSilenceDetection();
     finalTranscriptRef.current = "";
     setTranscript("");
-
     try {
       if (!audioStreamRef.current?.active) {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -997,7 +1531,7 @@ function InterviewSession() {
           setSilencePhase("none");
           silenceStartRef.current = null;
           setTranscript(full);
-          // Send live transcript to DB so recruiter monitor can see it in real time
+          // Send live transcript to DB for recruiter monitor
           fetch(`/api/interview-session/${token}/transcript`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1015,7 +1549,6 @@ function InterviewSession() {
     ws.onclose = () => { if (isListeningRef.current) { setIsListening(false); isListeningRef.current = false; } };
   }, [token, stopAssemblyAI, stopSilenceDetection, startSilenceDetection]);
 
-  // ── Proceed to next question ──
   const proceedToNext = useCallback(() => {
     const iv = interviewRef.current;
     const idx = currentIndexRef.current;
@@ -1043,72 +1576,6 @@ function InterviewSession() {
     }
   }, [doSpeak, startListeningForAnswer, endInterview]);
 
-  // ── Poll for live takeover ──
-  useEffect(() => {
-    if (!setupDone || !interview || interview.mode !== "ASYNC") return;
-    pollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/interview-session/${token}`);
-        const data = await res.json();
-        if (!res.ok) return;
-        if (data.interview.isLive && !liveJoined) {
-          setLiveJoined(true); stopListening();
-          const msg = data.interview.liveMessage || "Your interviewer has joined and will continue the interview.";
-          lastLiveMessageRef.current = msg;
-          doSpeak(msg, () => {});
-          return;
-        }
-        if (data.interview.isLive && data.interview.liveMessage) {
-          const newMsg = data.interview.liveMessage;
-          if (newMsg !== lastLiveMessageRef.current) {
-            lastLiveMessageRef.current = newMsg;
-            stopListening();
-            doSpeak(newMsg, () => { if (interviewRef.current?.interviewType === "VOICE") startListeningForAnswer(); });
-          }
-        }
-        if (!data.interview.isLive && liveJoined) {
-          setLiveJoined(false);
-          doSpeak("Your interviewer has left. Please continue answering the remaining questions.", () => {
-            if (interviewRef.current?.interviewType === "VOICE") startListeningForAnswer();
-          });
-        }
-      } catch {}
-    }, POLL_INTERVAL_MS);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [setupDone, interview, token, liveJoined]);
-
-  // ── Recording ──
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioStreamRef.current = stream;
-      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-      recordingChunksRef.current = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) recordingChunksRef.current.push(e.data); };
-      recorder.start(1000);
-      mediaRecorderRef.current = recorder;
-    } catch (err) { console.warn("Recording not available:", err); }
-  };
-
-  const stopAndUploadRecording = async (interviewId: string) => {
-    if (!mediaRecorderRef.current) return;
-    return new Promise<void>((resolve) => {
-      mediaRecorderRef.current!.onstop = async () => {
-        try {
-          const blob = new Blob(recordingChunksRef.current, { type: "audio/webm" });
-          const fd = new FormData();
-          fd.append("recording", blob, "interview.webm");
-          await fetch(`/api/recruiter/interviews/${interviewId}/recording`, {
-            method: "POST", headers: { "x-share-token": token }, body: fd,
-          });
-        } catch {}
-        finally { audioStreamRef.current?.getTracks().forEach((t) => t.stop()); resolve(); }
-      };
-      mediaRecorderRef.current!.stop();
-    });
-  };
-
-  // ── Voice: confirm answer ──
   const handleVoiceConfirm = useCallback(async () => {
     if (!transcript.trim()) return;
     setConfirming(true);
@@ -1139,7 +1606,6 @@ function InterviewSession() {
     } else { proceedToNext(); }
   }, [transcript, submitAnswer, stopListening, proceedToNext, checkFollowUp, doSpeak, startListeningForAnswer]);
 
-  // ── Voice: re-record ──
   const handleVoiceReRecord = useCallback(() => {
     setTranscript(""); finalTranscriptRef.current = "";
     const iv = interviewRef.current;
@@ -1150,7 +1616,6 @@ function InterviewSession() {
     if (currentQ) doSpeak(currentQ, () => { startListeningForAnswer(); });
   }, [doSpeak, startListeningForAnswer]);
 
-  // ── Text: submit ──
   const handleTextSubmit = useCallback(async () => {
     if (!textAnswer.trim()) return;
     setSubmitting(true);
@@ -1202,7 +1667,6 @@ function InterviewSession() {
     else endInterview();
   }, [endInterview]);
 
-  // ── Setup complete ──
   const handleSetupComplete = useCallback(async (
     selectedGender: "male" | "female" | "prefer-not-to-say",
     dob: string, paceValue: number, selectedVoiceId: string | null
@@ -1241,6 +1705,7 @@ function InterviewSession() {
   }, [doSpeak, startListeningForAnswer]);
 
   if (loading) return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-purple-400" /></div>;
+
   if (error) return (
     <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center p-6">
       <div className="max-w-md w-full rounded-3xl border border-white/10 bg-white/[0.02] p-10 text-center">
@@ -1250,6 +1715,7 @@ function InterviewSession() {
       </div>
     </div>
   );
+
   if (!interview) return null;
 
   if (!setupDone) {
@@ -1261,6 +1727,7 @@ function InterviewSession() {
         interviewType={interview.interviewType}
         voiceTier={interview.voiceTier || "web-speech"}
         defaultVoiceId={interview.voiceId}
+        totalQuestions={interview.totalQuestions}
         onStart={handleSetupComplete}
       />
     );
