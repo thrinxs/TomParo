@@ -10,10 +10,10 @@ interface LogoProps {
 }
 
 const sizeConfig: Record<LogoSize, string> = {
-  sm: "h-8",   // Footer (32px)
-  md: "h-10",  // Sidebar (40px)
-  lg: "h-11",  // Auth header (44px)
-  xl: "h-12",  // Navbar (48px)
+  sm: "h-5",   // Footer (20px)
+  md: "h-6",   // Sidebar (24px)
+  lg: "h-7",   // Auth header (28px)
+  xl: "h-8",   // Navbar (32px)
 };
 
 export default function Logo({
@@ -29,7 +29,7 @@ export default function Logo({
       alt="TomParo"
       width={500}
       height={200}
-      className={`${imageClass} w-auto`}
+      className={`${imageClass} w-auto brightness-0 invert`}
       priority
     />
   );
