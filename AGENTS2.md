@@ -18,14 +18,17 @@ ASSEMBLYAI_API_KEY=your_key_here
 app/api/tts/route.ts # UPDATED — ElevenLabs → HuggingFace → Web Speech fallback chain
 app/api/assemblyai/token/route.ts # NEW — generates short-lived AssemblyAI token for candidate page
 app/api/interview-session/[token]/transcript/route.ts # NEW — candidate sends live transcript chunks to DB
+app/api/interview-session/[token]/chat/route.ts # NEW — candidate sends complaint/message/question
+app/api/interview-session/[token]/paste-attempt/route.ts # NEW — logs paste attempts from candidate
 app/api/recruiter/interviews/[id]/follow-up/route.ts # NEW — AI decides + generates follow-up question
 app/api/recruiter/interviews/[id]/recording/route.ts # NEW — POST upload recording + GET signed URL
 app/api/recruiter/interviews/[id]/go-live/route.ts # NEW — PATCH isLive + liveMessage
 app/api/recruiter/interviews/[id]/live-transcript/route.ts # NEW — GET live transcript + PATCH stealth mode
 app/api/recruiter/interviews/[id]/notes/route.ts # NEW — GET/POST/DELETE recruiter notes on interview
-app/api/recruiter/interviews/[id]/rate/route.ts # NEW — PATCH per-question recruiter rating + flag
+app/api/recruiter/interviews/[id]/rate/route.ts # NEW — PATCH per-question recruiter rating + flag (uses Prisma.RecruiterInterviewQuestionUpdateInput)
 app/api/recruiter/interview-settings/route.ts # NEW — GET + PATCH global interview message template + defaultVoiceId
 components/recruiter/InterviewMonitorModal.tsx # NEW — floating interview monitor modal
+components/Footer.tsx # REBUILT — full professional footer with watermark
 
 ---
 
@@ -39,7 +42,9 @@ followUpCount Int @default(0)
 stealthMode Boolean @default(false) — recruiter watches without notifying candidate
 liveTranscript String? @db.Text — live transcript from AssemblyAI (updated every second)
 liveTranscriptUpdatedAt DateTime? — when transcript was last updated
+pasteAttempts Int @default(0) — how many times candidate tried to paste
 notes RecruiterInterviewNote[] — relation to notes model
+candidateMessages CandidateInterviewMessage[] — relation to candidate messages
 
 ### Added to RecruiterInterviewQuestion:
 
@@ -64,6 +69,24 @@ createdAt DateTime @default(now())
 updatedAt DateTime @updatedAt
 Relations: interview (RecruiterInterview), recruiter (RecruiterProfile)
 
+### New Model: CandidateInterviewMessage
+
+id String @id @default(cuid())
+interviewId String
+type CandidateMessageType @default(MESSAGE)
+category String? — complaint category (technical/unclear/time/audio/other)
+content String @db.Text
+read Boolean @default(false)
+readAt DateTime?
+createdAt DateTime @default(now())
+Relations: interview (RecruiterInterview)
+
+### New Enum: CandidateMessageType
+
+COMPLAINT
+MESSAGE
+QUESTION
+
 ### Added to RecruiterProfile:
 
 interviewNotes RecruiterInterviewNote[] — back-relation (REQUIRED by Prisma)
@@ -86,6 +109,7 @@ interviewNotes RecruiterInterviewNote[] — back-relation (REQUIRED by Prisma)
 ### /api/tts route behaviour
 
 POST body: { text: string, voiceId: string }
+
 - Tries ElevenLabs first (if voiceId + ELEVENLABS_API_KEY set)
 - Falls back to HuggingFace (if HUGGINGFACE_API_KEY set)
 - Returns 503 { error: "tts_unavailable", fallback: "web-speech" } if both fail
@@ -94,6 +118,7 @@ POST body: { text: string, voiceId: string }
 ### doSpeak() — finish guard (CRITICAL)
 
 Every doSpeak() call uses a `finished` boolean guard:
+
 - Prevents double-fire when ElevenLabs fails partway and fallback also calls finish()
 - Pattern: let finished = false; const finish = () => { if (finished) return; finished = true; ... }
 - ALWAYS use this pattern in any future speak implementation
@@ -105,12 +130,14 @@ Every doSpeak() call uses a `finished` boolean guard:
 ### Why AssemblyAI (replaced Web Speech API)
 
 Web Speech API was unreliable:
+
 - Stopped randomly after ~60s
 - Clicked between restarts
 - Repeated questions infinitely
 - Missed answers silently
 
 AssemblyAI WebSocket:
+
 - True continuous streaming
 - Sub-300ms transcript latency
 - 333 hours free streaming/month
@@ -138,6 +165,7 @@ AssemblyAI WebSocket:
 ### Silence Detection (kept from before)
 
 Still uses AudioContext + AnalyserNode alongside AssemblyAI:
+
 - Silence detection runs in parallel with AssemblyAI WebSocket
 - When FinalTranscript received → cancel repeat timer + reset isRepeatingRef
 - Silence thresholds controlled by pace slider (paceFromSlider)
@@ -152,6 +180,7 @@ STARTER + GROWTH → Web Speech API (browser built-in, robotic, free)
 BUSINESS + ENTERPRISE + SCALE + CUSTOM + ADMIN → ElevenLabs (human-like, $5/mo)
 
 Checked in:
+
 - /api/recruiter/interviews/route.ts (on create — resolves voiceId based on plan)
 - /api/interview-session/[token]/route.ts (returns voiceTier + voiceId to candidate page)
 - /app/(recruiter)/recruiter/interviews/new/page.tsx (shows voice picker only if isElevenLabsPlan)
@@ -208,22 +237,80 @@ Labels:
 
 ---
 
-## Voice Call Interview — Setup Screen
+## Interview Setup Screen — 5 Steps (ALL types)
 
-For VOICE interviews, candidate sees:
-1. Interview type card (Voice Call, with ElevenLabs badge if Business+)
-2. Gender selection (auto-detected from name, always overridable)
-3. Date of birth
-4. Pace slider (smooth 0-100 with live stats + preview button)
-5. Voice picker (ONLY shown for Business+ plans using ElevenLabs)
-6. Tips (shows exact seconds from selected pace)
-7. Begin Interview button
+Step 1 — Welcome:
 
-For TEXT interviews, candidate sees:
-1. Interview type card (Text Interview)
-2. Gender selection
-3. Date of birth
-4. Begin Interview button
+- Company name + role in sticky top bar
+- Interview type badge (Text=indigo, Voice=violet, Video=pink)
+- Step progress bar with labels
+- Greeting + interview overview card (questions, est time, format, mode)
+- What to expect section
+- Encouragement message
+
+Step 2 — System Check:
+
+- Browser compatibility check
+- Internet connection check
+- Microphone check (Voice/Video only)
+- Camera check (Video only)
+- Retry button on failure
+- Specific fix guidance per failure type
+
+Step 3 — Your Details:
+
+- Name confirmation with edit button
+- Gender selection (auto-detected from name, always overridable)
+- Date of birth (min age 16)
+
+Step 4 — Settings (Voice/Video only — skipped for Text):
+
+- Pace slider with live stats
+- Voice preview button
+- ElevenLabs voice picker (Business+ plans only)
+
+Step 5 — Ready:
+
+- Setup summary
+- Numbered interview guidelines (includes: no pasting allowed)
+- 3-item ready checklist — all must be checked before Begin activates
+- Consent notice
+
+---
+
+## Text Interview Screen — Full Feature List
+
+- Auto-next question — after submit + follow-up handled → next loads in 1.5s automatically
+- Sticky progress header — company, role, question X/Y, elapsed timer, estimated remaining, End button
+- Word count — live counter with color (red <30, amber <80, green 80+) + quality label
+- Autosave draft — saves to localStorage every 3s, "Draft saved" indicator, restored on refresh
+- Keyboard shortcut — Cmd/Ctrl+Enter to submit answer
+- Question timer — per-question timer resets on each new question
+- Paste blocking — onPaste prevented, warning shown, attempt logged to DB (pasteAttempts++)
+- Answer quality hint — tip appears between 20-80 words
+- Connection status — 🟢 Online / 🔴 Offline indicator in header
+- Recruiter watching indicator — shows only when isLive=true AND stealthMode=false
+- End Interview button — in sticky header, opens confirmation modal
+- Chat box — floating purple button bottom-right, opens panel with 3 tabs
+
+### Candidate Chat Box (all interview types)
+
+3 tabs:
+
+- 🚩 Complaint — 5 categories: Technical (mic/camera), Unclear question, Need more time, Audio issue, Other
+- 💬 Message — sends to recruiter (note shown if not live)
+- ❓ Question — ask about role/process/company
+
+Stored in CandidateInterviewMessage table.
+Recruiter sees on interview detail page.
+"Sent" confirmation shown after sending.
+
+### End Interview Confirmation Modal
+
+- Shows questions remaining count
+- Warning: unanswered questions marked as skipped
+- Cancel / Yes End Interview buttons
+- Graceful ending: closing message plays → recording uploads → completion screen
 
 ---
 
@@ -232,6 +319,7 @@ For TEXT interviews, candidate sees:
 ### How It Works
 
 After candidate submits each MAIN question answer:
+
 1. /api/recruiter/interviews/[id]/follow-up called with { questionId, answer, shareToken }
 2. analyzeForFollowUp() — Gemini decides if follow-up is warranted
 3. If yes → generateFollowUpQuestion() — Gemini writes natural follow-up
@@ -240,6 +328,7 @@ After candidate submits each MAIN question answer:
 6. Candidate sees/hears the follow-up before moving to next main question
 
 ### Rules
+
 - Max 3 follow-ups per interview total
 - Never follow up on a follow-up question
 - Never follow up on a skipped question
@@ -251,11 +340,13 @@ After candidate submits each MAIN question answer:
 ## Interview Monitor Modal (components/recruiter/InterviewMonitorModal.tsx)
 
 ### Three Size States
+
 - corner — small floating widget, draggable anywhere on screen
 - maximized — full screen overlay (two-column layout)
 - minimized — thin bar at bottom right (candidate name + timer + progress)
 
 ### Features
+
 - Live transcript feed — polls /api/recruiter/interviews/[id]/live-transcript every 1s
 - Interview timer — counts up from 0:00 from when modal opened
 - Current question display — shows question recruiter is watching
@@ -268,140 +359,121 @@ After candidate submits each MAIN question answer:
 - Send message → AI reads aloud to candidate
 - Voice dictation for messages
 - Skip question button
-- Repeat question button (populates message box with question text)
-- Draggable in corner mode (mousedown + mousemove + mouseup)
-- Pulsing red dot when live, grey when watching silently
+- Repeat question button
+- Draggable in corner mode
+- Pulsing red dot when live, grey when stealth
 
 ### Stealth Mode Flow
+
 1. Recruiter opens Monitor Modal → clicks "Go Stealth"
 2. PATCH /api/recruiter/interviews/[id]/live-transcript { stealthMode: true }
 3. isLive stays FALSE — candidate NOT notified
 4. Recruiter watches live transcript in real time
 5. When ready → clicks "Announce My Presence"
-6. stealthMode set to false, isLive set to true
-7. liveMessage sent: "Hi [Name]! Your interviewer has joined..."
-8. Candidate sees banner + AI reads announcement aloud
+6. stealthMode=false, isLive=true, liveMessage sent
+7. Candidate sees banner + AI reads announcement aloud
 
 ---
 
 ## Interview Detail Page (app/(recruiter)/recruiter/interviews/[id]/page.tsx)
 
-### Full Rebuild — What's Now There
+Full rebuild — see previous AGENTS2.md for full details. Key additions:
 
-Header:
-- Breadcrumb navigation
-- Monitor Interview button (opens InterviewMonitorModal)
-- Manual refresh button (spin animation while refreshing)
-- Auto-refresh every 30s when status = IN_PROGRESS
-- Live alert banner (red pulsing dot when isLive = true)
-
-Stats Bar (5 columns):
-- Total Questions
-- Answered
-- Skipped
-- Follow-ups
-- Progress %
-
-2-Column Layout:
-- Left (2/3): AI Summary, Live panel, Recording player, Questions list
-- Right (1/3): Candidate info, AI recommendation, pipeline actions, health indicator, score breakdown, timeline, share link, go live, complete, notes
-
-Candidate Info Card (right sidebar):
-- Avatar with initials + color
-- Name, email, job title, location
-- Type/Mode/Status badges
-- Profile link + Email quick action
-
-AI Recommendation + Pipeline (right sidebar, shows after completion):
-- Recommendation badge (Strong Hire / Hire / Maybe / No Hire)
-- Final score (X/100)
-- Pipeline action buttons: Shortlist, Reject, Send Offer, Follow Up
-
-Health Indicator:
-- 🟢 Strong Performance (avgScore >= 7 AND progress >= 80%)
-- 🟡 Average Performance (avgScore >= 5 AND progress >= 60%)
-- 🔴 Weak Performance (below thresholds)
-
-Score Breakdown (by question type):
-- CV Verification avg score + progress bar
-- Location Based avg score + progress bar
-- Job Specific avg score + progress bar
-- Behavioural avg score + progress bar
-- Color coded: green ≥8, amber ≥5, red <5
-
-Interview Timeline:
-- Created (always shown with date)
-- Started (shown when startedAt set)
-- Completed (shown when completedAt set)
-
-Questions List (left column):
-- Each main question shows: type badge, answered/skipped status, AI score (colored dot + X/10)
-- Recruiter rating buttons per answer: 👍 (rating=1), 👎 (rating=-1)
-- Flag button per answer (🚩) — highlights card with red ring
-- Candidate answer + AI feedback per answered question
-- Follow-up questions nested under parent with connector line
-- Waiting/skipped states for unanswered questions
-- Live answer entry (LIVE mode only) with dictation support
-
-Notes (right sidebar, collapsible):
-- Add private note textarea + save button
-- Notes list with timestamp
-- Delete note on hover (trash icon)
-- Stored in RecruiterInterviewNote model
+- Monitor Interview button → opens InterviewMonitorModal
+- Paste attempts shown on interview card
+- Candidate messages (complaints/questions) visible to recruiter
 
 ---
 
 ## Interviews List Page (app/(recruiter)/recruiter/interviews/page.tsx)
 
-Full rebuild with:
-- Live alert banner (red pulsing) when any interview isLive
-- Stats bar: Total, Active, Completed, Avg Score
-- Search by name/job/email
-- Sort dropdown: Newest, Oldest, Highest score, Lowest score, Name A-Z
-- Status tabs with counts: All, Pending, In Progress, Completed, Cancelled
-- Bulk select + bulk delete
-- Select all checkbox row
-- Per-card: candidate avatar (initials + color), email, type badge (TEXT/VOICE/VIDEO), mode badge, follow-up count badge, time elapsed, progress bar, score (colored dot), recommendation badge, LIVE pulse
-- Quick actions on hover: copy link, open, delete
-- Empty states per status filter
-- Refresh button with spin animation (refreshing state)
-- fetchInterviews(isManual) — passes isManual to show spinner only on manual refresh
+Full rebuild with stats, live alert, sort, bulk delete, type badges, time elapsed, etc.
+Refresh button has spin animation (refreshing state only shows spinner on manual click).
 
 ---
 
-## Prisma Schema — Permanent Fix Strategy
+## Logo System
 
-### Problem
-Python string replacement scripts silently fail when exact string not found.
-sed with line numbers works but loses indentation on macOS.
+### Logo Component (components/Logo.tsx)
 
-### Permanent Solution for Adding Schema Fields
-1. Find exact line number: grep -n "target_field" prisma/schema.prisma
-2. Use sed to insert AFTER that line: sed -i '' 'NUMa\ field_name Type' prisma/schema.prisma
-3. Fix indentation immediately: sed -i '' 's/^field_name/  field_name/' prisma/schema.prisma
-4. Verify: sed -n 'NUM-2,NUM+4p' prisma/schema.prisma
-5. Push: DATABASE_URL="..." DIRECT_URL="..." npx prisma db push
+Uses: /images/tomparo_logo.png (white logo)
+Sizes: sm=32px, md=40px, lg=48px, xl=56px
+No CSS filter needed — tomparo_logo.png is already white.
+Used in: Navbar, RecruiterSidebar, DashboardSidebar, auth pages
 
-### Permanent Solution for Prisma TypeScript Errors
-ALWAYS use: import { Prisma } from "@prisma/client"
-Then type update data as: const data: Prisma.ModelNameUpdateInput = {}
-Build data object by assigning fields conditionally — never spread conditionals.
-This permanently prevents the union type mismatch error.
+### Footer Logo
 
-### DB Push When Local Network Fails
-Local MacBook sometimes can't reach Supabase pooler (port 6543).
-Use DIRECT_URL (port 5432) for migrations:
-DATABASE_URL="$(grep DIRECT_URL .env.local | cut -d'"' -f2)" DIRECT_URL="$(grep DIRECT_URL .env.local | cut -d'"' -f2)" npx prisma db push
+Footer uses a CUSTOM Image directly (not Logo component) at style={{ height: "380px" }}
+Source: /images/tomparo_logo.png
+This is independent of Logo component — changing Logo sizes does NOT affect footer.
+
+### Footer Watermark
+
+Background watermark uses /images/logo.png (colored logo) at opacity-[0.04]
+Positioned absolute, centered, covers full footer, pointer-events-none
+
+### Favicon
+
+public/favicon.ico — root level (auto-detected by Next.js)
+All favicon variants in public/images/favicon_io/
+Configured in app/layout.tsx metadata.icons
+
+---
+
+## Footer (components/Footer.tsx)
+
+Full professional footer with:
+
+- 4-column link grid: For Job Seekers, For Recruiters, Company, Legal
+- 2x2 grid on mobile (NOT stacked) — grid-cols-2 sm:grid-cols-4
+- Brand column: custom logo (380px), tagline, social icons, Made in Nigeria badge
+- Social icons: Twitter/X (sky), LinkedIn (blue), Instagram (pink), Email (purple) — brand colors on hover
+- Gradient top line (purple)
+- Watermark logo (logo.png at 4% opacity)
+- Bottom bar: copyright + Built by Thrinxs + All systems operational (green pulse)
+- Hidden on: dashboard, admin, staff, support, recruiter/_ (not recruiter-pricing), interview/_
 
 ---
 
 ## Navbar Fix
 
-app/components/layout/Navbar.tsx — hideNavbar conditions updated:
-- pathname === "/recruiter" (exact match — was missing before, caused double navbar)
+hideNavbar conditions:
+
+- /signin, /signup, /forgot-password
+- /dashboard/\*
+- /admin/_, /staff/_, /support/\*
+- /interview/\*
+- pathname === "/recruiter" (exact — was missing before)
 - pathname.startsWith("/recruiter/") && !pathname.startsWith("/recruiter-pricing")
-- pathname.startsWith("/interview/") — hide on candidate interview pages
-- All dashboard/admin/staff/support routes unchanged
+
+---
+
+## Prisma Schema — Permanent Fix Strategy
+
+### DB Push When Local Network Fails
+
+Local MacBook sometimes can't reach Supabase pooler (port 6543).
+Use DIRECT_URL (port 5432) for migrations:
+DATABASE_URL="$(grep DIRECT_URL .env.local | cut -d'"' -f2)" DIRECT_URL="$(grep DIRECT_URL .env.local | cut -d'"' -f2)" npx prisma db push
+
+### Vercel DB Push (when local network completely fails)
+
+Change Vercel build command to:
+prisma db push --accept-data-loss && npm run build
+Redeploy → revert build command back to: npm run build
+
+### Permanent Solution for Prisma TypeScript Errors
+
+ALWAYS use: import { Prisma } from "@prisma/client"
+Then type update data as: const data: Prisma.ModelNameUpdateInput = {}
+Build data object by assigning fields conditionally — never spread conditionals.
+
+### Adding Schema Fields on macOS
+
+1. grep -n "target_field" prisma/schema.prisma → get line number
+2. sed -i '' 'NUMa\ field_name Type' prisma/schema.prisma
+3. sed -i '' 's/^field_name/ field_name/' prisma/schema.prisma (fix indentation)
+4. Verify with sed -n 'NUM-2,NUM+4p' prisma/schema.prisma
 
 ---
 
@@ -409,19 +481,24 @@ app/components/layout/Navbar.tsx — hideNavbar conditions updated:
 
 ### Phase 5 ✅ COMPLETE — AI Interviews
 
-TEXT interviews: ✅ All working
-VOICE interviews: ✅ AssemblyAI replaces Web Speech API for listening
+TEXT interviews: ✅ Auto-next, paste blocking, word count, autosave, timers, chat box, end interview
+VOICE interviews: ✅ AssemblyAI WebSocket replaces Web Speech API
 TTS: ✅ ElevenLabs → HuggingFace → Web Speech fallback chain
+Setup Screen: ✅ 5-step flow (Welcome, System Check, Details, Settings, Ready)
 Monitor Modal: ✅ Stealth mode, live transcript, draggable, 3 sizes
 Interview Detail: ✅ Full rebuild with all features
 Interviews List: ✅ Full rebuild with all features
+Footer: ✅ Full professional footer with watermark
+Logo: ✅ White tomparo_logo.png across all pages, correct favicons
 
 ### Known Limitations
+
 - Voice interviews require HTTPS — test on tomparo.com not localhost
 - AssemblyAI free tier: 333 hours streaming/month
-- ElevenLabs free tier: 10,000 credits/month (exhausted during testing — top up $5)
+- ElevenLabs free tier: 10,000 credits/month (exhausted — top up $5)
 - HuggingFace TTS is slower than ElevenLabs (~2-3s delay)
 - Local Supabase connection may fail — use DIRECT_URL workaround
+- CandidateInterviewMessage + pasteAttempts schema may need Vercel db push if local network fails
 
 ---
 
@@ -431,16 +508,18 @@ Interviews List: ✅ Full rebuild with all features
 - [ ] AI employment letter (PDF + DOCX)
 - [ ] AI offer letter (PDF + DOCX)
 - [ ] AI NDA generation
-- [ ] Extra HR documents: promotion, confirmation, probation, warning, termination, exit, experience, recommendation, internship letters
+- [ ] Extra HR documents
 - [ ] HR policies generator
 - [ ] Employee handbook generator
 - [ ] AI performance review
 - [ ] Hiring cost dashboard
 - [ ] Culture fit score
 - [ ] Featured job badge
-- [ ] Pipeline action buttons on interview detail (Shortlist/Reject/Send Offer wired to actual API)
-- [ ] Video interview candidate page UI (recording infra built, UI pending)
+- [ ] Pipeline action buttons wired to actual API (Shortlist/Reject/Send Offer)
+- [ ] Video interview candidate page UI
 - [ ] Password reset emails (Resend — route exists, email not wired)
+- [ ] Candidate messages panel on interview detail page (read/reply)
+- [ ] Paste attempts displayed on interview detail page
 
 ---
 
@@ -448,22 +527,27 @@ Interviews List: ✅ Full rebuild with all features
 
 - **ASSEMBLYAI_API_KEY:** Server-side only. Proxy via /api/assemblyai/token. Never expose to browser.
 - **AssemblyAI token route:** Public — no session auth. Validates by shareToken instead.
-- **Live transcript flow:** AssemblyAI FinalTranscript → POST /api/interview-session/[token]/transcript → DB → recruiter modal polls every 1s
+- **Live transcript flow:** FinalTranscript → POST /api/interview-session/[token]/transcript → DB → recruiter modal polls every 1s
 - **Stealth mode:** isLive stays false. Recruiter watches liveTranscript. Candidate unaware.
-- **Announce presence:** Sets stealthMode=false + isLive=true + sends liveMessage in one operation.
-- **Monitor modal size:** "corner" | "maximized" | "minimized" — state lives in modal component
-- **Dragging:** Only works in corner mode. Uses mousedown/mousemove/mouseup on window.
-- **Pipeline actions:** Currently UI only (buttons exist, API calls not wired). Wire in Phase 6.
-- **RecruiterInterviewNote:** Always include back-relation on RecruiterProfile or Prisma will reject schema.
-- **Prisma update types:** Always import Prisma from @prisma/client and use Prisma.ModelUpdateInput.
-- **DB push locally:** Use DIRECT_URL (port 5432) not DATABASE_URL (port 6543/pgbouncer) for migrations.
-- **Navbar double render:** Fixed. Must check pathname === "/recruiter" (exact) not just startsWith("/recruiter/").
-- **Auto-refresh:** Interview detail page refreshes silently every 30s when IN_PROGRESS. Manual refresh shows spinner.
-- **Score colors:** ≥8 = emerald, ≥5 = amber, <5 = red. Applied to dots, text, progress bars.
-- **Health indicator:** Based on avgScore (scored questions only) AND progress %. Both must meet threshold.
-- **Notes:** Private to recruiter. Not shown to candidate. Stored in RecruiterInterviewNote table.
-- **Flagged answers:** Red ring on question card. Flag badge shown. Stored in RecruiterInterviewQuestion.flagged.
-- **Recruiter rating:** +1 (thumbs up) or -1 (thumbs down) or null. Stored in recruiterRating field.
-- **ElevenLabs quota:** 10K credits/month free. ~254 credits per question. Top up $5 for 30K credits.
-- **HuggingFace TTS model:** microsoft/speecht5_tts with bdl speaker embedding (clear male English voice).
-- **TTS Content-Type:** ElevenLabs returns audio/mpeg. HuggingFace returns audio/flac. Both play via Audio element.
+- **Paste blocking:** onPaste preventDefault + toast warning + POST /api/interview-session/[token]/paste-attempt
+- **pasteAttempts:** Stored on RecruiterInterview. Recruiter can see count. Candidate doesn't know it's logged.
+- **CandidateInterviewMessage:** type = COMPLAINT | MESSAGE | QUESTION. category only for COMPLAINT.
+- **Auto-next text interview:** After submitAnswer + checkFollowUp resolves → setTimeout 1500ms → proceedToNext()
+- **Draft autosave:** localStorage key = tomparo-draft-${token}-${currentIndex}. Cleared on submit + completion.
+- **Keyboard shortcut:** Cmd/Ctrl+Enter — added via window.addEventListener("keydown")
+- **Word count threshold:** <30 red, <80 amber, 80+ green. Quality hint shows at 20-80 words.
+- **Recruiter watching:** Only shows when isLive=true AND stealthMode=false — never in stealth
+- **Logo component:** sm=32px, md=40px, lg=48px, xl=56px — these are sidebar/navbar sizes ONLY
+- **Footer logo:** Custom Image at height 380px — independent of Logo component
+- **Footer watermark:** logo.png at opacity-[0.04] — colored logo behind footer content
+- **Favicon:** public/favicon.ico at root — Next.js auto-detects. Also in metadata.icons.
+- **RecruiterSidebar logo:** size="md" with px-4 py-3 container
+- **DashboardSidebar logo:** size="md" with px-4 py-3 container
+- **Vercel Google Fonts error:** Local network sometimes blocks fonts.gstatic.com. Use git push directly — Vercel builds fine.
+- **Pipeline actions:** Currently UI only. Wire to actual candidate status API in Phase 6.
+- **Monitor modal dragging:** Only in corner mode. mousedown/mousemove/mouseup on window.
+- **RecruiterInterviewNote:** Always add back-relation on RecruiterProfile or Prisma rejects schema.
+- **Prisma update types:** Always import { Prisma } from "@prisma/client" and use Prisma.ModelUpdateInput.
+- **ElevenLabs quota:** 10K credits/month free. Top up $5 for 30K credits.
+- **HuggingFace TTS model:** microsoft/speecht5_tts with bdl speaker embedding.
+- **TTS Content-Type:** ElevenLabs=audio/mpeg, HuggingFace=audio/flac. Both play via Audio element.
