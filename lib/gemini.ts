@@ -191,20 +191,27 @@ export async function generateJSONWithGemini<T>(
   cleaned = cleaned.replace(/\s*```$/g, "");
   cleaned = cleaned.trim();
 
+  // Handle both objects {} and arrays []
   const firstBrace = cleaned.indexOf("{");
+  const firstBracket = cleaned.indexOf("[");
   const lastBrace = cleaned.lastIndexOf("}");
+  const lastBracket = cleaned.lastIndexOf("]");
 
-  if (firstBrace === -1) {
-    console.error("❌ No opening brace found");
+  const startsWithArray = firstBracket !== -1 && (firstBrace === -1 || firstBracket < firstBrace);
+  const startChar = startsWithArray ? firstBracket : firstBrace;
+  const endChar = startsWithArray ? lastBracket : lastBrace;
+
+  if (startChar === -1) {
+    console.error("❌ No opening brace or bracket found");
     throw new Error("AI response is not valid JSON");
   }
 
   let jsonString: string;
 
-  if (lastBrace > firstBrace) {
-    jsonString = cleaned.slice(firstBrace, lastBrace + 1);
+  if (endChar > startChar) {
+    jsonString = cleaned.slice(startChar, endChar + 1);
   } else {
-    jsonString = cleaned.slice(firstBrace);
+    jsonString = cleaned.slice(startChar);
   }
 
   try {

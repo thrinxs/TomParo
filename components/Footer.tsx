@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
-import Logo from "@/components/Logo";
 import { Twitter, Linkedin, Instagram, Mail, ArrowUpRight } from "lucide-react";
 
 const footerLinks = {
@@ -113,19 +112,21 @@ export default function Footer() {
 
       <div className="relative max-w-7xl mx-auto px-6">
 
-        {/* ── Main footer grid ── */}
-        <div className="pt-6 pb-16 grid grid-cols-1 lg:grid-cols-6 gap-8">
+        {/* ── Main footer grid — brand (2 cols) + 4 link sections (1 col each) = 6 cols ── */}
+        <div className="pt-12 pb-10 grid grid-cols-2 lg:grid-cols-6 gap-8">
 
-          {/* ── Brand column ── */}
-          <div className="lg:col-span-2 space-y-2">
-            {/* Logo — custom footer size, flush left, no padding */}
-            <Link href="/" className="inline-block">
+          {/* ── Brand column — spans 2 cols on all sizes ── */}
+          <div className="col-span-2 flex flex-col gap-4">
+
+            {/* Logo */}
+            <Link href="/" className="inline-block w-fit">
               <Image
                 src="/images/tomparo_logo.png"
                 alt="TomParo"
                 width={500}
                 height={200}
-                className="w-auto" style={{ height: "380px" }}
+                className="w-auto"
+                style={{ height: "40px" }}
                 priority
               />
             </Link>
@@ -157,29 +158,27 @@ export default function Footer() {
             </div>
           </div>
 
-          {/* ── Link columns — 2x2 grid on mobile, 4 cols on desktop ── */}
-          <div className="lg:col-span-4 grid grid-cols-2 sm:grid-cols-4 gap-8">
-            {Object.values(footerLinks).map((section) => (
-              <div key={section.title} className="space-y-4">
-                <h4 className="text-xs font-semibold text-white uppercase tracking-widest">
-                  {section.title}
-                </h4>
-                <ul className="space-y-3">
-                  {section.links.map((link) => (
-                    <li key={link.label}>
-                      <Link
-                        href={link.href}
-                        className="group inline-flex items-center gap-1 text-sm text-slate-500 hover:text-white transition-colors duration-200"
-                      >
-                        {link.label}
-                        <ArrowUpRight className="w-3 h-3 opacity-0 -translate-y-0.5 translate-x-0.5 group-hover:opacity-100 group-hover:translate-y-0 group-hover:translate-x-0 transition-all duration-200" />
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
+          {/* ── Link columns — each gets 1 col on desktop, 1 col (half width) on mobile ── */}
+          {Object.values(footerLinks).map((section) => (
+            <div key={section.title} className="col-span-1 space-y-4">
+              <h4 className="text-xs font-semibold text-white uppercase tracking-widest">
+                {section.title}
+              </h4>
+              <ul className="space-y-3">
+                {section.links.map((link) => (
+                  <li key={link.label}>
+                    <Link
+                      href={link.href}
+                      className="group inline-flex items-center gap-1 text-sm text-slate-500 hover:text-white transition-colors duration-200"
+                    >
+                      {link.label}
+                      <ArrowUpRight className="w-3 h-3 opacity-0 -translate-y-0.5 translate-x-0.5 group-hover:opacity-100 group-hover:translate-y-0 group-hover:translate-x-0 transition-all duration-200" />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
 
         {/* ── Divider ── */}
