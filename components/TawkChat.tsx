@@ -15,7 +15,7 @@ export default function TawkChat() {
   const { data: session } = useSession();
   const pathname = usePathname();
 
-  const hideOnPages = ["/signin", "/signup", "/forgot-password"];
+  const hideOnPages = ["/signin", "/signup", "/forgot-password", "/interview/"];
   const shouldHide = hideOnPages.some((page) => pathname?.startsWith(page));
 
   useEffect(() => {

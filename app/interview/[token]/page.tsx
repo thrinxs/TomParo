@@ -1614,9 +1614,9 @@ function InterviewSession() {
     const ok = await submitAnswer(q.id, textAnswer);
     setSubmitting(false);
     if (!ok) return;
-    const shouldFollowUp = iv.allowFollowUps ? await checkFollowUp(q.id, textAnswer) : false;
     setTextAnswer("");
     setJustAnswered(true);
+    const shouldFollowUp = iv.allowFollowUps ? await checkFollowUp(q.id, textAnswer) : false;
     if (!shouldFollowUp) {
       setTimeout(() => {
         proceedToNext();
